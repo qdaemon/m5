@@ -465,7 +465,7 @@ end # class M5
 
 #######################################################################
 #
-# TESTING
+#     MAIN
 #
 #######################################################################
 
@@ -473,22 +473,13 @@ if $0 == __FILE__
 
   require 'yaml'
 
+  print "Content-type: text/html\n\n"
+
   m5 = M5.new
-
-  print "Content-type: text/plain\n\n"
-  puts "***** PID #{m5.pid}"
-  puts "***** m5.get_os_release #{m5.get_os_release.inspect}"
-  puts "***** m5.get_uname #{m5.get_uname.inspect}"
-  puts "***** m5.get_uptime #{m5.get_uptime.inspect}"
-  puts "***** m5.get_loadavg #{m5.get_loadavg.inspect}"
-  puts "***** m5.get_cpuinfo #{m5.get_cpuinfo.inspect}"
-  puts "***** m5.get_meminfo #{m5.get_meminfo.inspect}"
-  puts "***** m5.get_vmstat #{m5.get_vmstat.inspect}"
-  puts "***** m5.get_ip_bindings #{m5.get_ip_bindings.inspect}"
-  puts "***** m5.get_tcp_listen_ports #{m5.get_tcp_listen_ports.inspect}"
-  puts "***** m5.get_dmi_system_information #{m5.get_dmi_system_information.inspect}"
-
-  puts "***** m5.get_processes #{m5.get_processes.to_yaml}"
+  puts "<h3>PID</h3>" + "#{m5.pid}"
+  m5.info_methods.each { |m|
+    puts "<h3>#{m}</h3>" + "<pre>" + eval ( "m5.#{m}.to_yaml" ) + "</pre>"
+  }
 
 end
 
