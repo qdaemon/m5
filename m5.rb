@@ -3,7 +3,6 @@
 # Intelligent monitoring
 #   - Must run as "root".
 #
-#  TODO:  Add iostat (i/o utilization)
 
 class M5
 # ---------------------------------------------------------------------
@@ -552,8 +551,7 @@ if $0 == __FILE__
   print "Content-type: text/html\n\n"
 
   m5 = M5.new
-  puts "<h3>PID</h3>" + "#{m5.pid}"
-  m5.info_methods.each { |m|
+  (['pid'] + m5.info_methods).each { |m|
     puts "<h3>#{m}</h3>" + "<pre>" + eval ( "m5.#{m}.to_yaml" ) + "</pre>"
   }
 
