@@ -441,62 +441,6 @@ def get_children_pids( top_pid )
   return rtn
 end
 
-# -----------------------------------
-# FUNCTION:  Generic HTTP send.
-# Return [ HTTP_STAT_CODE|<http response code>, <body> ].
-# -----------------------------------
-def http_send(
-    host,
-    port,
-    method,
-    url,
-    params={},
-    open_timeout=10,
-    read_timeout=30,
-    headers=false
-  )
-  require 'net/http'
-  require 'cgi'
-  rtn = []
-  data = []
-  conn_timeout = open_timeout + read_timeout
-  params = {} if params.nil?
-  begin
-    timeout( conn_timeout ) do
-      conn = Net::HTTP.new( host, port )
-      conn.open_timeout = open_timeout
-      conn.read_timeout = read_timeout
-      conn_params = params.keys.collect { |k|
-        "#{CGI::escape(k)}=#{CGI::escape(params[k].to_s)}"
-      }.join('&')
-      rtn = case method
-        when /get/i
-          url = url + ( conn_params == "" ?  "" : "?#{conn_params}" )
-          response = conn.get( url, nil )
-          if response.code.to_i >= 200 or response.code.to_i < 300
-            response.each { |k,v| puts "#{k}: #{v}" } if headers
-            response.body.each_line { |l| data << l.to_s.strip }
-          end
-          [ "HTTP_STAT_CODE|#{response.code}", data ].flatten
-        when /post/i
-          response = conn.post( url, conn_params )
-          if response.code.to_i >= 200 or response.code.to_i < 300
-            response.each { |k,v| puts "#{k}: #{v}" } if headers
-            response.body.each_line { |l| data << l.to_s.strip }
-          end
-          [ "HTTP_STAT_CODE|#{response.code}", data ].flatten
-        else
-          ["ERROR|Unknown method [#{method}]"]
-      end
-    end
-    rescue TimeoutError
-      rtn = ["ERROR|#{$!.to_s.strip}"]
-    rescue
-      rtn = ["ERROR|#{$!.to_s.strip}"]
-  end
-return rtn
-end
-
 # ----------
 # Function to display class/host information ...
 # ----------
