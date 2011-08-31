@@ -28,6 +28,7 @@ def initialize()
     get_vmstat
     get_ip_bindings
     get_tcp_listen_ports
+    get_iostat
     get_dmi_system_information
     get_processes
   )
@@ -311,9 +312,84 @@ def get_tcp_listen_ports()
 end
 
 # ------------------------------
+# FUNCTION:  Get iostat information.
+# Return { <info> => <value>, ... }
+# Expected 'iostat -x 1 2' output format:
+# (Ignoring the first set, and only picking up the second)
+#  ...
+# avg-cpu:  %user   %nice %system %iowait  %steal   %idle
+#            0.28    0.00    0.12    0.07    0.00   99.53
+#
+# Device:  rrqm/s wrqm/s r/s  w/s  rsec/s wsec/s avgrq-sz avgqu-sz await svctm %util
+# sdb      0.00   0.00   0.00 0.00 0.00   0.00   48.38    0.00     2.86  2.29  0.00
+# sda      0.00   2.54   0.00 2.07 0.11   36.89  17.79    0.07     32.05 4.11  0.85
+#  ...
+# ------------------------------
+def get_iostat()
+  rtn = {
+    'code' => 'OK',
+    'msg' => nil,
+    'res' => { 'avg-cpu' => {}, 'Device' => {}, 'item_dev' => nil }
+  }
+  begin
+    # Cycle until find '^avg-cpu:', then capture.  Then look for '^Device:',
+    # then capture ...
+    fnd_cpu, cptr_cpu, item_cpu = [ false, false, nil ]
+    fnd_dev, cptr_dev, item_dev = [ false, false, nil ]
+    set_found = 0
+    IO.popen('iostat -x 1 2 2>&1', 'r').each_line { |l|
+      l.strip!
+      set_found += 1 if /^avg-cpu:/.match(l)
+      if set_found == 2 # Only work on second set!
+        if not fnd_cpu and /^avg-cpu:/.match(l)
+            # Begin capture of CPU info.  Next line only ...
+            fnd_cpu, cptr_cpu = [ true, true ]
+            cptr_dev = false
+            item_cpu = l.split(':')[1].strip.split(/\s+/) # CPU keys list ...
+            item_cpu.each { |a| rtn['res']['avg-cpu'][a] = nil } # Init ...
+        elsif not fnd_dev and /^Device:/.match(l)
+            # Begin capture of devices until blank line detected ...
+            cptr_cpu = false
+            fnd_dev, cptr_dev = [ true, true ]
+            item_dev = l.split(':')[1].strip.split(/\s+/) # DEV keys list ...
+        else
+          if cptr_cpu
+            # Only grab one line after "avg-cpu:" ...
+            count = 0
+            # Matching CPU attr to CPU keys list found earlier ...
+            l.split(/\s+/).each { |i|
+              rtn['res']['avg-cpu'][item_cpu[count]] = i
+              count += 1
+            }
+            cptr_cpu = false
+          elsif cptr_dev
+            # Keep grabbing device info until find blank line ...
+            if l == ''
+              cptr_dev = false
+            else
+              larr = l.split(/\s+/)
+              rtn['res']['Device'][larr[0]] = {}
+              count = 0
+              # Matching DEV attr to DEV keys list found earlier ...
+              larr.slice(1..-1).each { |i|
+                rtn['res']['Device'][larr[0]][item_dev[count]] = i
+                count += 1
+              }
+            end
+          end
+        end
+      end
+    }
+    rescue
+      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+  end
+  return rtn
+end
+
+# ------------------------------
 # FUNCTION:  Get DMI information.  Specifically, "System Information".
 # Return { <info> => <value>, ... }
-# Expected '/usr/sbin/dmidecode' output format:
+# Expected 'dmidecode' output format:
 #  ...
 #  System Information
 #        Manufacturer: IBM
