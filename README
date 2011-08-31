@@ -1,5 +1,7 @@
 Project m5
 
+dsh.rb - Script to run ssh over a large number of hosts using SSH transport.
+
 m5.rb - Script to run under cron every X minutes.  Expected to pull data, compare data, and do work as required.  The "do work as required" is yet to be defined.
 
 
