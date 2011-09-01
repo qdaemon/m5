@@ -4,15 +4,19 @@
 #   - Must run as "root".
 #
 # General note(s):
-#   - Any "NOTES" information below has been gotten by way of man pages, web
-#     lookup, training materials, etc.  They are in no way my own, though I
-#     claim full responsibilities for any errors ...
+#
+# + Any "NOTES" information below has been gotten by way of man pages, web
+# lookup, training materials, etc.  They are in no way my own, though I claim
+# full responsibilities for any errors.
+#
+# +  __method__ is used in functions to retrieve name of "this" function in
+# the @mec class variable.  This only works with ruby version >= 1.8.7.
 #
 
 class M5
 # ---------------------------------------------------------------------
 
-attr_reader :pid, :init_time, :info_methods
+attr_reader :pid, :init_time, :mec, :info_methods, :settings
 #attr_writer :nothing_yet
 
 # -----------------------------------
@@ -20,9 +24,18 @@ attr_reader :pid, :init_time, :info_methods
 # -----------------------------------
 def initialize()
 
+  require 'timeout'
+
+  # "This" process' PID ...
   @pid = $$
+
+  # "This" object's instantiation time ...
   @init_time = Time.new
 
+  # Method Error Code.  To be eval'ed in functions ...
+  @mec = '"ERROR/#{__method__}"'
+
+  # List of methods that pulls systems stats ...
   @info_methods = %w(
     get_os_release
     get_uname
@@ -41,6 +54,20 @@ def initialize()
     get_processes
   )
 
+  # Some reasonable settings ...
+  @settings = {
+    'ACTION_TIMEOUT' => 10, # Max time to run any action.
+    'MAX_THREADS'    => 4   # Max number of threads.
+  }
+
+end
+
+# -----------------------------------
+# FUNCTION:  Given some time object, calculate change in time since.
+# Return <change in time from current> in ms as %0.3f string format.
+# -----------------------------------
+def time_since( dtg )
+  return sprintf("%0.6f microsec", Time.new - dtg)
 end
 
 # -----------------------------------
@@ -49,21 +76,12 @@ end
 #            list are of the same sizes.
 # Return { key => val }
 # -----------------------------------
-def map_k_to_v( list_k, list_v)
+def map_k_to_v( list_k, list_v )
   rtn = {}
-  begin
-    if list_k.length == list_v.length
-      count = 0
-      list_k.each { |k|
-        rtn[k] = list_v[count]
-        count += 1
-      }
-    else
-      rtn['code'] = 'ERROR-map_k_to_v'
-      rtn['msg'] = 'keys and values list are not of same sizes'
-    end
-    rescue
-      rtn['code'], rtn['msg'] = ['ERROR-map_k_to_v', $!.to_s.strip]
+  if list_k.length == list_v.length
+    count = 0 ; list_k.each { |k| rtn[k] = list_v[count] ; count += 1 }
+  else
+    rtn[eval(@mec)] = 'Keys and values lists are not of same length'
   end
   return rtn
 end
@@ -79,22 +97,29 @@ def get_os_release()
     'res' => []
   }
   begin
-    # Supported (in order below):  Redhat, SuSE, Ubuntu ...
-    %w(
-      /etc/redhat-release
-      /etc/SuSE-release
-      /etc/lsb-release
-    ).each { |f|
-      if FileTest.exist?(f)
-        rtn['res'] = File.open(f, 'r').readlines.map { |l|
-          l.strip! ; ( l == '' ? nil : l )
-        }.compact
-        break
-      end
-    }
-    rtn['res'] << 'UNKNOWN' if rtn['res'].length < 1
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      # Supported (in order below):  Redhat, SuSE, Ubuntu ...
+      %w(
+        /etc/redhat-release
+        /etc/SuSE-release
+        /etc/lsb-release
+      ).each { |f|
+        if FileTest.exist?(f)
+          rtn['res'] = File.open(f, 'r').readlines.map { |l|
+            l.strip! ; ( l == '' ? nil : l )
+          }.compact
+          break
+        end
+      }
+      rtn['res'] << 'UNKNOWN' if rtn['res'].length < 1
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_os_release', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -112,11 +137,18 @@ def get_uname()
     'res' => []
   }
   begin
-    rtn['res'] = IO.popen('uname -snrvm 2>&1', 'r').readlines.map { |l|
-      l.strip! ; ( l == '' ? nil : l )
-    }.compact
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      rtn['res'] = IO.popen('uname -snrvm 2>&1', 'r').readlines.map { |l|
+        l.strip! ; ( l == '' ? nil : l )
+      }.compact
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_uname', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -137,17 +169,24 @@ def get_uptime()
     'res' => {'uptime' => nil, 'idle' => nil}
   }
   begin
-    File.open( '/proc/uptime', 'r' ).each_line { |l|
-      l.strip!
-      if /^[0-9]+/.match(l)
-        upt, idl = l.split(/\s+/)
-        rtn['res']['uptime'] = upt.to_i
-        rtn['res']['idle'] = idl.to_i
-        break
-      end
-    }
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      File.open( '/proc/uptime', 'r' ).each_line { |l|
+        l.strip!
+        if /^[0-9]+/.match(l)
+          upt, idl = l.split(/\s+/)
+          rtn['res']['uptime'] = upt.to_i
+          rtn['res']['idle'] = idl.to_i
+          break
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_uptime', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -173,16 +212,23 @@ def get_loadavg()
     'res' => {'m1' => nil, 'm5' => nil, 'm15' => nil}
   }
   begin
-    File.open('/proc/loadavg', 'r').each_line { |l|
-      l.strip!
-      if /^[0-9]+/.match(l)
-        rtn['res']['m1'], rtn['res']['m5'], rtn['res']['m15'],
-          dont_care, dont_care = l.split(/\s+/)
-        break
-      end
-    }
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      File.open('/proc/loadavg', 'r').each_line { |l|
+        l.strip!
+        if /^[0-9]+/.match(l)
+          rtn['res']['m1'], rtn['res']['m5'], rtn['res']['m15'],
+            dont_care, dont_care = l.split(/\s+/)
+          break
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_loadavg', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -198,19 +244,26 @@ def get_cpuinfo()
     'res' => {}
   }
   begin
-    File.open('/proc/cpuinfo', 'r').each_line { |l|
-      l.strip!
-      if not l == ''
-        k, v = l.split(':').map { |i|
-          ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
-        }
-        next if k == '' or v == ''
-        rtn['res'][k] = [] if not rtn['res'].has_key?(k)
-        rtn['res'][k] << v
-      end
-    }
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      File.open('/proc/cpuinfo', 'r').each_line { |l|
+        l.strip!
+        if not l == ''
+          k, v = l.split(':').map { |i|
+            ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
+          }
+          next if k == '' or v == ''
+          rtn['res'][k] = [] if not rtn['res'].has_key?(k)
+          rtn['res'][k] << v
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_cpuinfo', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -237,19 +290,26 @@ def get_meminfo()
     'res' => {}
   }
   begin
-    File.open('/proc/meminfo', 'r').each_line { |l|
-      l.strip!
-      if not l == ''
-        k, v = l.split(':').map { |i|
-          ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
-        }
-        next if k == '' or v == ''
-        rtn['res'][k] = [] if not rtn['res'].has_key?(k)
-        rtn['res'][k] << v
-      end
-    }
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      File.open('/proc/meminfo', 'r').each_line { |l|
+        l.strip!
+        if not l == ''
+          k, v = l.split(':').map { |i|
+            ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
+          }
+          next if k == '' or v == ''
+          rtn['res'][k] = [] if not rtn['res'].has_key?(k)
+          rtn['res'][k] << v
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_meminfo', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -268,19 +328,26 @@ def get_vmstat()
     'res' => {}
   }
   begin
-    File.open('/proc/vmstat', 'r').each_line { |l|
-      l.strip!
-      if not l == ''
-        k, v = l.split(/\s+/).map { |i|
-          ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
-        }
-        next if k == '' or v == ''
-        rtn['res'][k] = [] if not rtn['res'].has_key?(k)
-        rtn['res'][k] << v
-      end
-    }
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      File.open('/proc/vmstat', 'r').each_line { |l|
+        l.strip!
+        if not l == ''
+          k, v = l.split(/\s+/).map { |i|
+            ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
+          }
+          next if k == '' or v == ''
+          rtn['res'][k] = [] if not rtn['res'].has_key?(k)
+          rtn['res'][k] << v
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_vmstat', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -300,18 +367,25 @@ def get_ip_bindings()
     'res' => {}
   }
   begin
-    IO.popen('ip address show 2>&1', 'r').each_line { |l|
-      l.strip!
-      if /\binet\b/.match(l)
-        l_arr = l.split(/\s+/)
-        ip_nic = l_arr[-1]
-        ip_addr = l_arr[1]
-        rtn['res'][ip_nic] = [] if not rtn['res'].has_key?(ip_nic)
-        rtn['res'][ip_nic] << ip_addr
-      end
-    }
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      IO.popen('ip address show 2>&1', 'r').each_line { |l|
+        l.strip!
+        if /\binet\b/.match(l)
+          l_arr = l.split(/\s+/)
+          ip_nic = l_arr[-1]
+          ip_addr = l_arr[1]
+          rtn['res'][ip_nic] = [] if not rtn['res'].has_key?(ip_nic)
+          rtn['res'][ip_nic] << ip_addr
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_ip_bindings', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -356,28 +430,35 @@ def get_netstat_i()
     'res' => {}
   }
   begin
-    # Cycle until find '^Iface:', then start capture on next line.  Continue
-    # until first blank line ...
-    start_cptr = false
-    item_iface = nil
-    IO.popen('netstat -i 2>&1', 'r').each_line { |l|
-      l.strip!
-      if not l == ''
-        if /^Iface\b/.match(l)
-          start_cptr = true
-          item_iface = l.split(/\s+/).slice(1..-1) # Iface keys list ...
-        elsif start_cptr
-          next if /no stat/i.match(l)
-          la = l.split(/\s+/)
-          # Matching Iface values to Iface keys list found earlier ...
-          rtn['res'][la[0]] = map_k_to_v(item_iface, la.slice(1..-1))
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      # Cycle until find '^Iface:', then start capture on next line.
+      # Continue until first blank line ...
+      start_cptr = false
+      item_iface = nil
+      IO.popen('netstat -i 2>&1', 'r').each_line { |l|
+        l.strip!
+        if not l == ''
+          if /^Iface\b/.match(l)
+            start_cptr = true
+            item_iface = l.split(/\s+/).slice(1..-1) # Iface keys list ...
+          elsif start_cptr
+            next if /no stat/i.match(l)
+            la = l.split(/\s+/)
+            # Matching Iface values to Iface keys list found earlier ...
+            rtn['res'][la[0]] = map_k_to_v(item_iface, la.slice(1..-1))
+          end
+        elsif start_cptr # l == '' at this point ...
+          break
         end
-      elsif start_cptr # l == '' at this point ...
-        break
-      end
-    }
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_netstat_i', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -420,31 +501,38 @@ def get_netstat_pant()
     'res' => {}
   }
   begin
-    # Doing count for everyone else but LISTEN ...
-    IO.popen('netstat -pant 2>&1', 'r').each_line { |l|
-      if /^tcp\s+.*$/.match(l)
-        line = l.strip.split(/\s+/)
-        state = line[5]
-        if not rtn['res'].has_key?(state)
-          # Initialize new state if not yet seen ...
-          rtn['res'][state] = {}
-          rtn['res'][state]['COUNT'] = 0
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      # Doing count for everyone else but LISTEN ...
+      IO.popen('netstat -pant 2>&1', 'r').each_line { |l|
+        if /^tcp\s+.*$/.match(l)
+          line = l.strip.split(/\s+/)
+          state = line[5]
+          if not rtn['res'].has_key?(state)
+            # Initialize new state if not yet seen ...
+            rtn['res'][state] = {}
+            rtn['res'][state]['COUNT'] = 0
+          end
+          rtn['res'][state]['COUNT'] += 1
+          if state == 'LISTEN'
+            # LISTEN ...
+            pid, dontcare = line[6].split(/\//)
+            rtn['res'][state][pid] = [] if not rtn['res'][state].has_key?(pid)
+            rtn['res'][state][pid] << line[3] # line[3] is addr:port ...
+          else # All other states ...
+            rtn['res'][state][line[6]] = 0 \
+              if not rtn['res'][state].has_key?(line[6])
+            rtn['res'][state][line[6]] += 1
+          end
         end
-        rtn['res'][state]['COUNT'] += 1
-        if state == 'LISTEN'
-          # LISTEN ...
-          pid, dontcare = line[6].split(/\//)
-          rtn['res'][state][pid] = [] if not rtn['res'][state].has_key?(pid)
-          rtn['res'][state][pid] << line[3] # line[3] is addr:port ...
-        else # All other states ...
-          rtn['res'][state][line[6]] = 0 \
-            if not rtn['res'][state].has_key?(line[6])
-          rtn['res'][state][line[6]] += 1
-        end
-      end
-    }
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_netstat_pant', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -488,27 +576,34 @@ def get_netstat_rn()
     'res' => {}
   }
   begin
-    # Cycle until find '^Iface:', then start capture on next line.  Continue
-    # until first blank line ...
-    start_cptr = false
-    item_route = nil
-    IO.popen('netstat -rn 2>&1', 'r').each_line { |l|
-      l.strip!
-      if not l == ''
-        if /^Destination\b/.match(l)
-          start_cptr = true
-          item_route = l.split(/\s+/).slice(1..-1) # Route keys list ...
-        elsif start_cptr
-          la = l.split(/\s+/)
-          # Matching Route values to Route keys list found earlier ...
-          rtn['res'][la[0]] = map_k_to_v(item_route, la.slice(1..-1))
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      # Cycle until find '^Iface:', then start capture on next line.  Continue
+      # until first blank line ...
+      start_cptr = false
+      item_route = nil
+      IO.popen('netstat -rn 2>&1', 'r').each_line { |l|
+        l.strip!
+        if not l == ''
+          if /^Destination\b/.match(l)
+            start_cptr = true
+            item_route = l.split(/\s+/).slice(1..-1) # Route keys list ...
+          elsif start_cptr
+            la = l.split(/\s+/)
+            # Matching Route values to Route keys list found earlier ...
+            rtn['res'][la[0]] = map_k_to_v(item_route, la.slice(1..-1))
+          end
+        elsif start_cptr # l == '' at this point ...
+          break
         end
-      elsif start_cptr # l == '' at this point ...
-        break
-      end
-    }
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_netstat_rn', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -566,47 +661,55 @@ def get_iostat()
     'res' => { 'avg-cpu' => {}, 'Device' => {} }
   }
   begin
-    # Cycle until find '^avg-cpu:', then capture.  Then look for '^Device:',
-    # then capture ...
-    fnd_cpu, cptr_cpu, item_cpu = [ false, false, nil ]
-    fnd_dev, cptr_dev, item_dev = [ false, false, nil ]
-    set_found = 0
-    IO.popen('iostat -x 1 2 2>&1', 'r').each_line { |l|
-      l.strip!
-      set_found += 1 if /^avg-cpu:/.match(l)
-      if set_found == 2 # Only work on second set!
-        if not fnd_cpu and /^avg-cpu:/.match(l)
-            # Begin capture of CPU info.  Next line only ...
-            fnd_cpu, cptr_cpu = [ true, true ]
-            cptr_dev = false
-            item_cpu = l.split(':')[1].strip.split(/\s+/) # CPU keys list ...
-            item_cpu.each { |a| rtn['res']['avg-cpu'][a] = nil } # Init ...
-        elsif not fnd_dev and /^Device:/.match(l)
-            # Begin capture of devices until blank line detected ...
-            cptr_cpu = false
-            fnd_dev, cptr_dev = [ true, true ]
-            item_dev = l.split(':')[1].strip.split(/\s+/) # DEV keys list ...
-        else
-          if cptr_cpu
-            # Only grab one line after "avg-cpu:" ...
-            # Matching CPU values to CPU keys list found earlier ...
-            rtn['res']['avg-cpu'] = map_k_to_v(item_cpu, l.split(/\s+/))
-            cptr_cpu = false
-          elsif cptr_dev
-            # Keep grabbing device info until find blank line ...
-            if l == ''
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      # Cycle until find '^avg-cpu:', then capture.  Then look for '^Device:',
+      # then capture ...
+      fnd_cpu, cptr_cpu, item_cpu = [ false, false, nil ]
+      fnd_dev, cptr_dev, item_dev = [ false, false, nil ]
+      set_found = 0
+      IO.popen('iostat -x 1 2 2>&1', 'r').each_line { |l|
+        l.strip!
+        set_found += 1 if /^avg-cpu:/.match(l)
+        if set_found == 2 # Only work on second set!
+          if not fnd_cpu and /^avg-cpu:/.match(l)
+              # Begin capture of CPU info.  Next line only ...
+              fnd_cpu, cptr_cpu = [ true, true ]
               cptr_dev = false
-            else
-              la = l.split(/\s+/)
-              # Matching DEV values to DEV keys list found earlier ...
-              rtn['res']['Device'][la[0]] = map_k_to_v(item_dev, la.slice(1..-1))
+              item_cpu = l.split(':')[1].strip.split(/\s+/) # CPU keys list ...
+              item_cpu.each { |a| rtn['res']['avg-cpu'][a] = nil } # Init ...
+          elsif not fnd_dev and /^Device:/.match(l)
+              # Begin capture of devices until blank line detected ...
+              cptr_cpu = false
+              fnd_dev, cptr_dev = [ true, true ]
+              item_dev = l.split(':')[1].strip.split(/\s+/) # DEV keys list ...
+          else
+            if cptr_cpu
+              # Only grab one line after "avg-cpu:" ...
+              # Matching CPU values to CPU keys list found earlier ...
+              rtn['res']['avg-cpu'] = map_k_to_v(item_cpu, l.split(/\s+/))
+              cptr_cpu = false
+            elsif cptr_dev
+              # Keep grabbing device info until find blank line ...
+              if l == ''
+                cptr_dev = false
+              else
+                la = l.split(/\s+/)
+                # Matching DEV values to DEV keys list found earlier ...
+                rtn['res']['Device'][la[0]] \
+                  = map_k_to_v(item_dev, la.slice(1..-1))
+              end
             end
           end
         end
-      end
-    }
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_iostat', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -634,32 +737,39 @@ def get_dmi_system_information()
     'res' => {}
   }
   begin
-    # Cycle until find System Information, then capture.  Stop after seeing
-    # '^Handle' or after 10 lines ...
-    found = false
-    start_capture = false
-    lines_gotten = 0
-    IO.popen('dmidecode 2>&1', 'r').each_line { |l|
-      break if lines_gotten > 10
-      l.strip!
-      if /^System Information/.match(l)
-          found = true
-          start_capture = true
-          next
-      elsif /^Handle /.match(l)
-          break if found and start_capture
-          start_capture = false
-      end
-      if start_capture
-        l_arr = l.split(':')
-        k = l_arr[0]
-        v = l_arr.slice(1..-1)
-        rtn['res'][k] = v.join(':') if ( not k.nil? ) and ( v.class == Array )
-        lines_gotten += 1
-      end
-    }
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      # Cycle until find System Information, then capture.  Stop after seeing
+      # '^Handle' or after 10 lines ...
+      found = false
+      start_capture = false
+      lines_gotten = 0
+      IO.popen('dmidecode 2>&1', 'r').each_line { |l|
+        break if lines_gotten > 10
+        l.strip!
+        if /^System Information/.match(l)
+            found = true
+            start_capture = true
+            next
+        elsif /^Handle /.match(l)
+            break if found and start_capture
+            start_capture = false
+        end
+        if start_capture
+          l_arr = l.split(':')
+          k = l_arr[0]
+          v = l_arr.slice(1..-1)
+          rtn['res'][k] = v.join(':') if (not k.nil?) and (v.class == Array)
+          lines_gotten += 1
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_dmi_system_information', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -677,19 +787,26 @@ def get_sysctl_a()
     'res' => {}
   }
   begin
-    IO.popen('sysctl -a 2>&1', 'r').each_line { |l|
-      l.strip!
-      if not l == '' and /=/.match(l)
-        k, v = l.split('=').map { |i|
-          ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
-        }
-        next if k == '' or v == ''
-        rtn['res'][k] = [] if not rtn['res'].has_key?(k)
-        rtn['res'][k] << v
-      end
-    }
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      IO.popen('sysctl -a 2>&1', 'r').each_line { |l|
+        l.strip!
+        if not l == '' and /=/.match(l)
+          k, v = l.split('=').map { |i|
+            ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
+          }
+          next if k == '' or v == ''
+          rtn['res'][k] = [] if not rtn['res'].has_key?(k)
+          rtn['res'][k] << v
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_sysctl_a', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -750,74 +867,81 @@ def get_processes()
     }
   }
   begin
-    # Ignore first line ...
-    IO.popen('ps axwww -o pid,ppid,user,rsz,vsz,stat,lstart,command 2>&1', 'r').readlines.slice(1..-1).each { |l|
-      i = l.strip.split(/\s+/)
-      #
-      # Filter out 'this' process and its children ...
-      #
-      if i[0].to_i != @pid && i[1].to_i != @pid
-        i_pid  = i[0]
-        i_ppid = i[1]
-        i_cmd  = i.slice(11..-1).join(' ')
-        i_info = {
-          'pid'        => i[0],
-          'ppid'       => i[1],
-          'user'       => i[2],
-          'rsz'        => i[3],
-          'vsz'        => i[4],
-          'stat'       => i[5],
-          'lstart'     => {
-            'y' => i[10],
-            'm' => i[7],
-            'd' => i[8],
-            'hms' => i[9].split(':')
-          },
-          'command'    => i_cmd,
-        }
+    time_start = Time.new
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      # Ignore first line ...
+      IO.popen('ps axwww -o pid,ppid,user,rsz,vsz,stat,lstart,command 2>&1', 'r').readlines.slice(1..-1).each { |l|
+        i = l.strip.split(/\s+/)
         #
-        # 'pkeys'.  Proc's primary key = pid:user:lstart(epoch) ...
+        # Filter out 'this' process and its children ...
         #
-        epoch = Time.local(
-          i_info['lstart']['y'],
-          i_info['lstart']['m'],
-          i_info['lstart']['d'],
-          i_info['lstart']['hms'][0],
-          i_info['lstart']['hms'][1],
-          i_info['lstart']['hms'][2]
-        ).to_i
-        pkey = "#{i_info['pid']}:#{i_info['user']}:#{epoch}"
-        rtn['res']['pkeys'][pkey] = i_info
-        #
-        # 'command' ...
-        #
-        rtn['res']['command'][i_cmd] = [] \
-          if not rtn['res']['command'].has_key?(i_cmd)
-        rtn['res']['command'][i_cmd] << i_pid
-        #
-        # 'command_count' ...
-        #
-        this_i_cmd = "#{i_cmd} (ppid=" \
-          + ( ( i_ppid == "0" or i_ppid == "1" ) ? "#{i_pid})" : "#{i_ppid})" )
-        rtn['res']['command_count'][this_i_cmd] = 0 \
-          if not rtn['res']['command_count'].has_key?(this_i_cmd)
-        rtn['res']['command_count'][this_i_cmd] += 1
-        #
-        # 'pid' ...
-        #
-        rtn['res']['pid'][i_pid] = i_info
-        #
-        # 'ppid' ...
-        #
-        rtn['res']['ppid'][i_ppid] = [] \
-          if not rtn['res']['ppid'].has_key?(i_ppid)
-        rtn['res']['ppid'][i_pid] = [] \
-          if not rtn['res']['ppid'].has_key?(i_pid)
-        rtn['res']['ppid'][i_ppid] << i_pid
-      end
-    }
+        if i[0].to_i != @pid && i[1].to_i != @pid
+          i_pid  = i[0]
+          i_ppid = i[1]
+          i_cmd  = i.slice(11..-1).join(' ')
+          i_info = {
+            'pid'        => i[0],
+            'ppid'       => i[1],
+            'user'       => i[2],
+            'rsz'        => i[3],
+            'vsz'        => i[4],
+            'stat'       => i[5],
+            'lstart'     => {
+              'y' => i[10],
+              'm' => i[7],
+              'd' => i[8],
+              'hms' => i[9].split(':')
+            },
+            'command'    => i_cmd,
+          }
+          #
+          # 'pkeys'.  Proc's primary key = pid:user:lstart(epoch) ...
+          #
+          epoch = Time.local(
+            i_info['lstart']['y'],
+            i_info['lstart']['m'],
+            i_info['lstart']['d'],
+            i_info['lstart']['hms'][0],
+            i_info['lstart']['hms'][1],
+            i_info['lstart']['hms'][2]
+          ).to_i
+          pkey = "#{i_info['pid']}:#{i_info['user']}:#{epoch}"
+          rtn['res']['pkeys'][pkey] = i_info
+          #
+          # 'command' ...
+          #
+          rtn['res']['command'][i_cmd] = [] \
+            if not rtn['res']['command'].has_key?(i_cmd)
+          rtn['res']['command'][i_cmd] << i_pid
+          #
+          # 'command_count' ...
+          #
+          this_i_cmd = "#{i_cmd} (ppid=" \
+            + ((i_ppid == "0" or i_ppid == "1") ? "#{i_pid})" : "#{i_ppid})")
+          rtn['res']['command_count'][this_i_cmd] = 0 \
+            if not rtn['res']['command_count'].has_key?(this_i_cmd)
+          rtn['res']['command_count'][this_i_cmd] += 1
+          #
+          # 'pid' ...
+          #
+          rtn['res']['pid'][i_pid] = i_info
+          #
+          # 'ppid' ...
+          #
+          rtn['res']['ppid'][i_ppid] = [] \
+            if not rtn['res']['ppid'].has_key?(i_ppid)
+          rtn['res']['ppid'][i_pid] = [] \
+            if not rtn['res']['ppid'].has_key?(i_pid)
+          rtn['res']['ppid'][i_ppid] << i_pid
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR-get_processes', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
   end
   return rtn
 end
@@ -834,15 +958,36 @@ end # class M5
 
 if $0 == __FILE__
 
-  require 'yaml'
-
-  print "Content-type: text/plain\n\n"
+  $stderr.reopen $stdout # Sending STDERR to STDOUT ...
+  $defout.sync = true    # Don't buffer I/O ...
 
   m5 = M5.new
-  hdr_ln = "---------------------------------------------------------------"
-  (['pid','init_time'] + m5.info_methods).each { |m|
-    puts hdr_ln, m, hdr_ln, eval( "m5.#{m}.to_yaml" )
+
+  # Look for m5's settings override in ENV variables ...
+  m5.settings.keys.each { |k|
+    tmp_env = "M5_#{k}"
+    if ENV.has_key?(tmp_env)
+      m5.settings[k] = ENV[tmp_env] if ENV[tmp_env] != ''
+    end
   }
+
+  # Exec ...
+  m5_out = {}
+  threads = []
+  (['pid','init_time'] + m5.info_methods).each { |met|
+    threads << Thread.new( met ) { |m|
+      print "(#{m}) "
+      m5_out[m] = eval("m5.#{m}")
+    }
+    while threads.find_all { |t| t.alive? }.length >= m5.settings['MAX_THREADS']
+      sleep(0.1)
+    end
+  }
+  threads.each { |t| t.join}
+  
+  require 'yaml'
+  print "Content-type: text/plain\n\n"
+  puts m5_out.to_yaml
 
 end
 
