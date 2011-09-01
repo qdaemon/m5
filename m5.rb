@@ -8,8 +8,6 @@
 #     lookup, training materials, etc.  They are in no way my own, though I
 #     claim full responsibilities for any errors ...
 #
-# TODO:
-#  - Fix pkeys (date to epoch)
 
 class M5
 # ---------------------------------------------------------------------
@@ -700,7 +698,7 @@ end
 # FUNCTION:  Get process(es) info.
 # Return {
 #   'pkeys' => {
-#     <pid:user:lstart> => [ i_info, ... ],
+#     <pid:user:lstart(epoch)> => [ i_info, ... ],
 #   },
 #   'command' => {
 #     cmd => [ i_info, ... ],
@@ -715,9 +713,9 @@ end
 #     pid => [ <self pid>, <child pid1>, <child pid2>, ... ],
 #   },
 # }.
-# ... where i_info is [pid,ppid,user,rsz_kb,vsz_kb,start_time,stat,cmd].
+# ... where i_info is [pid,ppid,user,rsz,vsz_kb,stat,lstart,cmd].
 # Expected 'ps' output format:
-#   <id> <parent> <user> <rsz> <vsz> <start time> <stat> <cmd>
+#   <id> <parent> <user> <rsz> <vsz> <stat> <lstart> <cmd>
 # First line will have something like this ...
 #   PID  PPID USER       RSS    VSZ START COMMAND
 # ... to be ignored.
@@ -752,9 +750,8 @@ def get_processes()
     }
   }
   begin
-    lstart_zone = Time.new.zone
     # Ignore first line ...
-    IO.popen('ps axwww -o pid,ppid,user,rsz,vsz,lstart,stat,command 2>&1', 'r').readlines.slice(1..-1).each { |l|
+    IO.popen('ps axwww -o pid,ppid,user,rsz,vsz,stat,lstart,command 2>&1', 'r').readlines.slice(1..-1).each { |l|
       i = l.strip.split(/\s+/)
       #
       # Filter out 'this' process and its children ...
@@ -769,14 +766,27 @@ def get_processes()
           'user'       => i[2],
           'rsz'        => i[3],
           'vsz'        => i[4],
-          'start_time' => "#{i.slice(5..9).join(' ')} #{lstart_zone}",
-          'stat'       => i[10],
+          'stat'       => i[5],
+          'lstart'     => {
+            'y' => i[10],
+            'm' => i[7],
+            'd' => i[8],
+            'hms' => i[9].split(':')
+          },
           'command'    => i_cmd,
         }
         #
-        # 'pkeys'.  Primary key to each proc is pid + user + lstart ...
+        # 'pkeys'.  Proc's primary key = pid:user:lstart(epoch) ...
         #
-        pkey = "#{i_info['pid']}:#{i_info['user']}:#{i_info['start_time']}"
+        epoch = Time.local(
+          i_info['lstart']['y'],
+          i_info['lstart']['m'],
+          i_info['lstart']['d'],
+          i_info['lstart']['hms'][0],
+          i_info['lstart']['hms'][1],
+          i_info['lstart']['hms'][2]
+        ).to_i
+        pkey = "#{i_info['pid']}:#{i_info['user']}:#{epoch}"
         rtn['res']['pkeys'][pkey] = i_info
         #
         # 'command' ...
