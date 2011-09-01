@@ -971,12 +971,17 @@ if $0 == __FILE__
     end
   }
 
+  # List of methods to exec ...
+  methods_list = ( ENV.has_key?('M5_METHODS_LIST') \
+    ? ENV['M5_METHODS_LIST'].split(',').map { |i| i.strip } \
+    : ['pid','init_time','settings'] + m5.info_methods 
+  )
+
   # Exec ...
   m5_out = {}
   threads = []
-  (['pid','init_time'] + m5.info_methods).each { |met|
+  methods_list.each { |met|
     threads << Thread.new( met ) { |m|
-      print "(#{m}) "
       m5_out[m] = eval("m5.#{m}")
     }
     while threads.find_all { |t| t.alive? }.length >= m5.settings['MAX_THREADS']
