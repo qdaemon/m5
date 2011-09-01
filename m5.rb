@@ -423,7 +423,7 @@ def get_netstat_pant()
   }
   begin
     # Doing count for everyone else but LISTEN ...
-    IO.popen('netstat -rn 2>&1', 'r').each_line { |l|
+    IO.popen('netstat -pant 2>&1', 'r').each_line { |l|
       if /^tcp\s+.*$/.match(l)
         line = l.strip.split(/\s+/)
         state = line[5]
