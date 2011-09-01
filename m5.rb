@@ -16,7 +16,7 @@
 class M5
 # ---------------------------------------------------------------------
 
-attr_reader :pid, :init_time, :mec, :info_methods, :settings
+attr_reader :pid, :init_time, :mec, :info_methods, :settings, :raw_data
 #attr_writer :nothing_yet
 
 # -----------------------------------
@@ -49,16 +49,21 @@ def initialize()
     get_netstat_pant
     get_netstat_rn
     get_iostat
-    get_dmi_system_information
+    get_dmidecode
     get_sysctl_a
     get_processes
   )
 
-  # Some reasonable settings ...
+  # Some reasonable settings.  Any may be override with ENV of the same name
+  # that begins with "M5_<setting>" ...
   @settings = {
-    'ACTION_TIMEOUT' => 10, # Max time to run any action.
-    'MAX_THREADS'    => 4   # Max number of threads.
+    'ACTION_TIMEOUT'   => 10,    # Max time to run any action.
+    'ENABLE_RAW_PRINT' => false, # Print out raw_data.
+    'MAX_THREADS'      => 4,     # Max number of threads.
   }
+
+  # Raw data ...
+  @raw_data = {}
 
 end
 
@@ -106,7 +111,9 @@ def get_os_release()
         /etc/lsb-release
       ).each { |f|
         if FileTest.exist?(f)
+          @raw_data[f] = []
           rtn['res'] = File.open(f, 'r').readlines.map { |l|
+            @raw_data[f] << l
             l.strip! ; ( l == '' ? nil : l )
           }.compact
           break
@@ -139,7 +146,10 @@ def get_uname()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      rtn['res'] = IO.popen('uname -snrvm 2>&1', 'r').readlines.map { |l|
+      p = 'uname -snrvm'
+      @raw_data[p] = []
+      rtn['res'] = IO.popen("#{p} 2>&1", 'r').readlines.map { |l|
+        @raw_data[p] << l
         l.strip! ; ( l == '' ? nil : l )
       }.compact
     end
@@ -171,7 +181,10 @@ def get_uptime()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      File.open( '/proc/uptime', 'r' ).each_line { |l|
+      f = '/proc/uptime'
+      @raw_data[f] = []
+      File.open(f, 'r' ).each_line { |l|
+        @raw_data[f] << l
         l.strip!
         if /^[0-9]+/.match(l)
           upt, idl = l.split(/\s+/)
@@ -214,7 +227,10 @@ def get_loadavg()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      File.open('/proc/loadavg', 'r').each_line { |l|
+      f = '/proc/loadavg'
+      @raw_data[f] = []
+      File.open(f, 'r').each_line { |l|
+        @raw_data[f] << l
         l.strip!
         if /^[0-9]+/.match(l)
           rtn['res']['m1'], rtn['res']['m5'], rtn['res']['m15'],
@@ -246,7 +262,10 @@ def get_cpuinfo()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      File.open('/proc/cpuinfo', 'r').each_line { |l|
+      f = '/proc/cpuinfo'
+      @raw_data[f] = []
+      File.open(f, 'r').each_line { |l|
+        @raw_data[f] << l
         l.strip!
         if not l == ''
           k, v = l.split(':').map { |i|
@@ -292,7 +311,10 @@ def get_meminfo()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      File.open('/proc/meminfo', 'r').each_line { |l|
+      f = '/proc/meminfo'
+      @raw_data[f] = []
+      File.open(f, 'r').each_line { |l|
+        @raw_data[f] << l
         l.strip!
         if not l == ''
           k, v = l.split(':').map { |i|
@@ -330,7 +352,10 @@ def get_vmstat()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      File.open('/proc/vmstat', 'r').each_line { |l|
+      f = '/proc/vmstat'
+      @raw_data[f] = []
+      File.open(f, 'r').each_line { |l|
+        @raw_data[f] << l
         l.strip!
         if not l == ''
           k, v = l.split(/\s+/).map { |i|
@@ -369,7 +394,10 @@ def get_ip_bindings()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      IO.popen('ip address show 2>&1', 'r').each_line { |l|
+      p = 'ip address show'
+      @raw_data[p] = []
+      IO.popen("#{p} 2>&1", 'r').each_line { |l|
+        @raw_data[p] << l
         l.strip!
         if /\binet\b/.match(l)
           l_arr = l.split(/\s+/)
@@ -436,7 +464,10 @@ def get_netstat_i()
       # Continue until first blank line ...
       start_cptr = false
       item_iface = nil
-      IO.popen('netstat -i 2>&1', 'r').each_line { |l|
+      p = 'netstat -i'
+      @raw_data[p] = []
+      IO.popen("#{p} 2>&1", 'r').each_line { |l|
+        @raw_data[p] << l
         l.strip!
         if not l == ''
           if /^Iface\b/.match(l)
@@ -503,8 +534,11 @@ def get_netstat_pant()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
+      p = 'netstat -pant'
+      @raw_data[p] = []
       # Doing count for everyone else but LISTEN ...
-      IO.popen('netstat -pant 2>&1', 'r').each_line { |l|
+      IO.popen("#{p} 2>&1", 'r').each_line { |l|
+        @raw_data[p] << l
         if /^tcp\s+.*$/.match(l)
           line = l.strip.split(/\s+/)
           state = line[5]
@@ -578,11 +612,14 @@ def get_netstat_rn()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
+      p = 'netstat -rn'
+      @raw_data[p] = []
       # Cycle until find '^Iface:', then start capture on next line.  Continue
       # until first blank line ...
       start_cptr = false
       item_route = nil
-      IO.popen('netstat -rn 2>&1', 'r').each_line { |l|
+      IO.popen("#{p} 2>&1", 'r').each_line { |l|
+        @raw_data[p] << l
         l.strip!
         if not l == ''
           if /^Destination\b/.match(l)
@@ -663,12 +700,15 @@ def get_iostat()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
+      p = 'iostat -x 1 2'
+      @raw_data[p] = []
       # Cycle until find '^avg-cpu:', then capture.  Then look for '^Device:',
       # then capture ...
       fnd_cpu, cptr_cpu, item_cpu = [ false, false, nil ]
       fnd_dev, cptr_dev, item_dev = [ false, false, nil ]
       set_found = 0
-      IO.popen('iostat -x 1 2 2>&1', 'r').each_line { |l|
+      IO.popen("#{p} 2>&1", 'r').each_line { |l|
+        @raw_data[p] << l
         l.strip!
         set_found += 1 if /^avg-cpu:/.match(l)
         if set_found == 2 # Only work on second set!
@@ -730,7 +770,7 @@ end
 #        Family: System x
 #  ...
 # ------------------------------
-def get_dmi_system_information()
+def get_dmidecode()
   rtn = {
     'code' => 'OK',
     'msg' => nil,
@@ -739,12 +779,15 @@ def get_dmi_system_information()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
+      p = 'dmidecode'
+      @raw_data[p] = []
       # Cycle until find System Information, then capture.  Stop after seeing
       # '^Handle' or after 10 lines ...
       found = false
       start_capture = false
       lines_gotten = 0
-      IO.popen('dmidecode 2>&1', 'r').each_line { |l|
+      IO.popen("#{p} 2>&1", 'r').each_line { |l|
+        @raw_data[p] << l
         break if lines_gotten > 10
         l.strip!
         if /^System Information/.match(l)
@@ -789,7 +832,10 @@ def get_sysctl_a()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      IO.popen('sysctl -a 2>&1', 'r').each_line { |l|
+      p = 'sysctl -a'
+      @raw_data[p] = []
+      IO.popen("#{p} 2>&1", 'r').each_line { |l|
+        @raw_data[p] << l
         l.strip!
         if not l == '' and /=/.match(l)
           k, v = l.split('=').map { |i|
@@ -869,8 +915,11 @@ def get_processes()
   begin
     time_start = Time.new
     timeout( @settings['ACTION_TIMEOUT'] ) do
+      p = 'ps axwww -o pid,ppid,user,rsz,vsz,stat,lstart,command'
+      @raw_data[p] = []
       # Ignore first line ...
-      IO.popen('ps axwww -o pid,ppid,user,rsz,vsz,stat,lstart,command 2>&1', 'r').readlines.slice(1..-1).each { |l|
+      IO.popen("#{p} 2>&1", 'r').readlines.slice(1..-1).each { |l|
+        @raw_data[p] << l
         i = l.strip.split(/\s+/)
         #
         # Filter out 'this' process and its children ...
@@ -961,26 +1010,37 @@ if $0 == __FILE__
   $stderr.reopen $stdout # Sending STDERR to STDOUT ...
   $defout.sync = true    # Don't buffer I/O ...
 
+  # Initializing ...
   m5 = M5.new
 
-  # Look for m5's settings override in ENV variables ...
+  # All options are driven off CGI ...
+  require 'cgi'
+  cgi = CGI.new()
+  #
+  # Get CGI options:
+  #   - Lists are comma delimited.
+  #   - methods - list of valid info_methods.
+  #
+  cgi_methods = cgi.has_key?('methods') ? cgi['methods'].split(',') : []
+  cgi_print = cgi.has_key?('print') ? cgi['print'].split(',') : []
+
+  # Look for setting's ENV overrides ...
   m5.settings.keys.each { |k|
-    tmp_env = "M5_#{k}"
-    if ENV.has_key?(tmp_env)
-      m5.settings[k] = ENV[tmp_env] if ENV[tmp_env] != ''
+    m5_k = "M5_#{k}"
+    if ENV.has_key?(m5_k)
+      m5.settings[k] = ENV[m5_k] if ENV[m5_k] != ''
     end
   }
 
-  # List of methods to exec ...
-  methods_list = ( ENV.has_key?('M5_METHODS_LIST') \
-    ? ENV['M5_METHODS_LIST'].split(',').map { |i| i.strip } \
-    : ['pid','init_time','settings'] + m5.info_methods 
-  )
+  # Build methods list ...
+  m_valid = ['pid','init_time','settings'] + m5.info_methods
+  m_list = cgi_methods.map { |m| m_valid.include?(m) ? m : nil }.compact
+  m_list = m_valid if m_list.empty?
 
-  # Exec ...
+  # Exec methods list ...
   m5_out = {}
   threads = []
-  methods_list.each { |met|
+  m_list.each { |met|
     threads << Thread.new( met ) { |m|
       m5_out[m] = eval("m5.#{m}")
     }
@@ -989,10 +1049,14 @@ if $0 == __FILE__
     end
   }
   threads.each { |t| t.join}
-  
-  require 'yaml'
-  print "Content-type: text/plain\n\n"
-  puts m5_out.to_yaml
+
+  # Print out as necessary ...
+  if not cgi_print.empty?
+    require 'yaml'
+    print "Content-type: text/plain\n\n"
+    puts m5_out.to_yaml if cgi_print.include?('yaml')
+    puts m5.raw_data.to_yaml if cgi_print.include?('raw')
+  end
 
 end
 
