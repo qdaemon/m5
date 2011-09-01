@@ -3,12 +3,19 @@
 # Intelligent monitoring
 #   - Must run as "root".
 #
+# General note(s):
+#   - Any "NOTES" information below has been gotten by way of man pages, web
+#     lookup, training materials, etc.  They are in no way my own, though I
+#     claim full responsibilities for any errors ...
+#
+# TODO:
+#  - Fix pkeys (date to epoch)
 
 class M5
 # ---------------------------------------------------------------------
 
-attr_reader :pid, :info_methods
-#attr_writer :configs
+attr_reader :pid, :init_time, :info_methods
+#attr_writer :nothing_yet
 
 # -----------------------------------
 # FUNCTION:  Class initializer.
@@ -16,6 +23,7 @@ attr_reader :pid, :info_methods
 def initialize()
 
   @pid = $$
+  @init_time = Time.new
 
   @info_methods = %w(
     get_os_release
@@ -26,17 +34,45 @@ def initialize()
     get_meminfo
     get_vmstat
     get_ip_bindings
-    get_tcp_listen_ports
+    get_netstat_i
+    get_netstat_pant
+    get_netstat_rn
     get_iostat
     get_dmi_system_information
+    get_sysctl_a
     get_processes
   )
 
 end
 
 # -----------------------------------
+# FUNCTION:  Given list of keys and values, return hash of keys map to values
+#            in the order of the list.  NOTE!!! This assumes keys and values
+#            list are of the same sizes.
+# Return { key => val }
+# -----------------------------------
+def map_k_to_v( list_k, list_v)
+  rtn = {}
+  begin
+    if list_k.length == list_v.length
+      count = 0
+      list_k.each { |k|
+        rtn[k] = list_v[count]
+        count += 1
+      }
+    else
+      rtn['code'] = 'ERROR-map_k_to_v'
+      rtn['msg'] = 'keys and values list are not of same sizes'
+    end
+    rescue
+      rtn['code'], rtn['msg'] = ['ERROR-map_k_to_v', $!.to_s.strip]
+  end
+  return rtn
+end
+
+# -----------------------------------
 # FUNCTION:  Get O/S release info.
-# Return [ <OS release info> ].
+# Return [ <OS release info> ]
 # -----------------------------------
 def get_os_release()
   rtn = {
@@ -60,14 +96,14 @@ def get_os_release()
     }
     rtn['res'] << 'UNKNOWN' if rtn['res'].length < 1
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = ['ERROR-get_os_release', $!.to_s.strip]
   end
   return rtn
 end
 
 # ------------------------------
 # FUNCTION:  Get uname info.
-# Return [ <output from 'uname'> ].
+# Return [ <output from 'uname'> ]
 # NOTES:  Expected 'uname' output format:
 #   <os_name> <host_name> <os_rel> <os_ver(3..-2)> <hdw_class(-1)>
 # ------------------------------
@@ -82,14 +118,14 @@ def get_uname()
       l.strip! ; ( l == '' ? nil : l )
     }.compact
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = ['ERROR-get_uname', $!.to_s.strip]
   end
   return rtn
 end
 
 # ------------------------------
 # FUNCTION:  Get uptime info.
-# Return { uptime => val, idle => val }.
+# Return { uptime => val, idle => val }
 # Expected '/proc/uptime' output format:
 #   <uptime sec>, <idle time sec>
 # NOTES:  /proc/info contains the length of time since the system was booted,
@@ -113,14 +149,14 @@ def get_uptime()
       end
     }
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = ['ERROR-get_uptime', $!.to_s.strip]
   end
   return rtn
 end
 
 # ------------------------------
 # FUNCTION:  Get load average info.
-# Return { m1 => val, m5 => val, m15 => val }.
+# Return { m1 => val, m5 => val, m15 => val }
 # Expected '/proc/loadavg' output format:
 #   <uptime sec>, <idle time sec>
 # NOTES:  /proc/loadavg contains information about the system load. The
@@ -148,14 +184,14 @@ def get_loadavg()
       end
     }
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = ['ERROR-get_loadavg', $!.to_s.strip]
   end
   return rtn
 end
 
 # -----------------------------------
 # FUNCTION:  Get CPU info.
-# Return { key => val }.
+# Return { key => val }
 # -----------------------------------
 def get_cpuinfo()
   rtn = {
@@ -176,14 +212,14 @@ def get_cpuinfo()
       end
     }
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = ['ERROR-get_cpuinfo', $!.to_s.strip]
   end
   return rtn
 end
 
 # ------------------------------
 # FUNCTION:  Get memory info.
-# Return { key => val }.
+# Return { key => val }
 # NOTES:
 #   A = buffers cache (memory is used by block device for e.g. file system
 #       meta data).
@@ -215,14 +251,14 @@ def get_meminfo()
       end
     }
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = ['ERROR-get_meminfo', $!.to_s.strip]
   end
   return rtn
 end
 
 # -----------------------------------
 # FUNCTION:  Get vmstat info.
-# Return { key => val }.
+# Return { key => val }
 # NOTES:  Some worthy keys to note ...
 #   pgmajfault - Number of major faults the system has made since boot, those
 #                which have required loading a memory  page from disk.
@@ -246,7 +282,7 @@ def get_vmstat()
       end
     }
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = ['ERROR-get_vmstat', $!.to_s.strip]
   end
   return rtn
 end
@@ -254,7 +290,7 @@ end
 # ------------------------------
 # FUNCTION:  Get all IP Addr and CIDR.
 # Return {
-#   '<nic>' = ["<addr1>/<network bit count>,<addr2>/<network bit count>,...]"
+#   iface = [addr1/CIDR,addr2/CIDR,...]
 # }
 # Expected '/sbin/ip address show|grep inet|grep -v 127.0.0.1' output format:
 #   inet <addr/cdir> brd <broadcast addr> scope <scope> <interface>
@@ -277,58 +313,259 @@ def get_ip_bindings()
       end
     }
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = ['ERROR-get_ip_bindings', $!.to_s.strip]
   end
   return rtn
 end
 
 # ------------------------------
-# FUNCTION:  Get open port(s) info for applications.
-# Return { <PID> => [ <appname>, <addr:port>, <addr:port>, ... ].
-# Expected 'netstat -pant' output format for 'tcp'/'LISTEN':
-#   tcp <recv-q> <send-q> <addr:port> <foreign addr:port> LISTEN <PID/app>
+# FUNCTION:  Get error rates on interface(s).
+# Return { iface => {key => val, ...}
+# Expected 'netstat -i' output format:
+# Kernel Interface table
+# Iface MTU Met RX-OK RX-ERR RX-DRP RX-OVR TX-OK TX-ERR TX-DRP TX-OVR Flg
+# eth0 1500  0 30177273 0 0 0 8953207 0 0 0 BMRU
+# lo   16436 0 2879107  0 0 0 2879107 0 0 0 LRU
+# NOTES:
+#   keys -
+#     MTU    - Maximum Transmission Unit.  Largest size of IP datagram which
+#              may be transferred using a specific data link connection.
+#     Met    - Metric
+#     RX-OK  - Received
+#     RX-ERR - Received errors
+#     RX-DRP - Received dropped
+#     RX-OVR - Received due to overruns
+#     TX-OK  - Transmitted
+#     TX-ERR - Transmit errors
+#     TX-DRP - Transmit dropped
+#     TX-OVR - Transmit lost due to overruns
+#     Flg    - (See Flags below)
+#   Flags (Flg) -
+#     B - A broadcast address has been set.
+#     L - This interface is a loopback device.
+#     M - All packets are received (promiscuous mode).
+#     O - ARP is turned off for this interface.
+#     P - This is a point-to-point connection.
+#     R - Interface is running.
+#     U - Interface is up.
+#     m - Master
+#     s - Slave
 # ------------------------------
-def get_tcp_listen_ports()
+def get_netstat_i()
   rtn = {
     'code' => 'OK',
     'msg' => nil,
     'res' => {}
   }
   begin
-    IO.popen('netstat -pant 2>&1', 'r').each_line { |l|
-      if /^tcp\s+.*\s+LISTEN/.match(l)
-        line = l.strip.split(/\s+/)
-        port = line[3]
-        pid, app = line[6].split(/\//)
-        rtn['res'][pid] = [] if not rtn['res'].has_key?(pid)
-        rtn['res'][pid] << port
+    # Cycle until find '^Iface:', then start capture on next line.  Continue
+    # until first blank line ...
+    start_cptr = false
+    item_iface = nil
+    IO.popen('netstat -i 2>&1', 'r').each_line { |l|
+      l.strip!
+      if not l == ''
+        if /^Iface\b/.match(l)
+          start_cptr = true
+          item_iface = l.split(/\s+/).slice(1..-1) # Iface keys list ...
+        elsif start_cptr
+          next if /no stat/i.match(l)
+          la = l.split(/\s+/)
+          # Matching Iface values to Iface keys list found earlier ...
+          rtn['res'][la[0]] = map_k_to_v(item_iface, la.slice(1..-1))
+        end
+      elsif start_cptr # l == '' at this point ...
+        break
       end
     }
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = ['ERROR-get_netstat_i', $!.to_s.strip]
+  end
+  return rtn
+end
+
+# ------------------------------
+# FUNCTION:  Get open port(s) info for applications.
+# Return { state => {
+#    COUNT => <#found>, 
+#    PID => [ addr:port, addr:port, ... ] for LISTEN,
+#    PID/APP => <#found> for all other states
+#  }
+# Expected 'netstat -pant' output format for 'tcp'/'LISTEN':
+#   tcp <recv-q> <send-q> <addr:port> <foreign addr:port> LISTEN <PID/app>
+# NOTES:
+#   states -
+#     ESTABLISHED - The socket has an established connection.
+#     SYN_SENT - The socket is actively attempting to establish a connection.
+#     SYN_RECV - A connection request has been received from the network.
+#     FIN_WAIT1 - The socket is closed, and the connection is shutting down.
+#     FIN_WAIT2 - Connection is closed, and the socket is waiting for a
+#                 shutdown from the remote end.
+#     TIME_WAIT - The socket is waiting after close to handle packets still in
+#                 the network.
+#     CLOSED - The socket is not being used.
+#     CLOSE_WAIT - The remote end has shut down, waiting for the socket to
+#                  close.
+#     LAST_ACK - The remote end has shut down, and the socket is closed.
+#                Waiting for acknowledgement.
+#     LISTEN - The socket  is listening for incoming connections.  Such sockets
+#              are not included in the output unless you specify the
+#              --listening (-l) or --all (-a) option.
+#     CLOSING - Both sockets are shut down but we still don't have all our data
+#               sent.
+#     UNKNOWN - The state of the socket is unknown.
+# ------------------------------
+def get_netstat_pant()
+  rtn = {
+    'code' => 'OK',
+    'msg' => nil,
+    'res' => {}
+  }
+  begin
+    # Doing count for everyone else but LISTEN ...
+    IO.popen('netstat -rn 2>&1', 'r').each_line { |l|
+      if /^tcp\s+.*$/.match(l)
+        line = l.strip.split(/\s+/)
+        state = line[5]
+        if not rtn['res'].has_key?(state)
+          # Initialize new state if not yet seen ...
+          rtn['res'][state] = {}
+          rtn['res'][state]['COUNT'] = 0
+        end
+        rtn['res'][state]['COUNT'] += 1
+        if state == 'LISTEN'
+          # LISTEN ...
+          pid, dontcare = line[6].split(/\//)
+          rtn['res'][state][pid] = [] if not rtn['res'][state].has_key?(pid)
+          rtn['res'][state][pid] << line[3] # line[3] is addr:port ...
+        else # All other states ...
+          rtn['res'][state][line[6]] = 0 \
+            if not rtn['res'][state].has_key?(line[6])
+          rtn['res'][state][line[6]] += 1
+        end
+      end
+    }
+    rescue
+      rtn['code'], rtn['msg'] = ['ERROR-get_netstat_pant', $!.to_s.strip]
+  end
+  return rtn
+end
+
+# ------------------------------
+# FUNCTION:  Get network routes.
+# Return { destination => {key => val, ...}
+# Expected 'netstat -rn' output format:
+# Destination  Gateway        Genmask       Flags MSS Window irtt Iface
+# 10.136.128.0 0.0.0.0        255.255.240.0 U     0   0         0 bond0
+# 127.0.0.0    0.0.0.0        255.0.0.0     U     0   0         0 lo
+# 0.0.0.0      10.136.128.240 0.0.0.0       UG    0   0         0 bond0
+# NOTES:
+#   keys -
+#     MSS - stands for Maximum Segment Size - the size of the largest datagram
+#           for transmission via this route.
+#     Window - the maximum amount of data the system will accept in a single
+#              burst from a remote host for this route.
+#     irtt - Initial Round Trip Time.  The TCP protocol has a built-in
+#            reliability check. If a data packet fails during transmission,
+#            it's re-transmitted. The protocol keeps track of how long the
+#            takes for the data to reach the destination and acknowledgement to
+#            be received. If the acknowledgement does not come within that
+#            timeframe, the packet is retransmitted. The amount of time the
+#            protocol has to wait before re-transmitting is set for the
+#            interface once (which can be changed) and that value is known as
+#            initial round trip time. A value of 0 means the default value is
+#            used.
+#   Flags -
+#     G - the route uses a gateway.
+#     U - the interface to be used is up (available).
+#     H - only a single host can be reached through the route; e.g., this is
+#         the case for the loopback entry 127.0.0.1.
+#     D - this route is dynamically created.
+#     ! - the route is a reject route and data will be dropped.
+# ------------------------------
+def get_netstat_rn()
+  rtn = {
+    'code' => 'OK',
+    'msg' => nil,
+    'res' => {}
+  }
+  begin
+    # Cycle until find '^Iface:', then start capture on next line.  Continue
+    # until first blank line ...
+    start_cptr = false
+    item_route = nil
+    IO.popen('netstat -rn 2>&1', 'r').each_line { |l|
+      l.strip!
+      if not l == ''
+        if /^Destination\b/.match(l)
+          start_cptr = true
+          item_route = l.split(/\s+/).slice(1..-1) # Route keys list ...
+        elsif start_cptr
+          la = l.split(/\s+/)
+          # Matching Route values to Route keys list found earlier ...
+          rtn['res'][la[0]] = map_k_to_v(item_route, la.slice(1..-1))
+        end
+      elsif start_cptr # l == '' at this point ...
+        break
+      end
+    }
+    rescue
+      rtn['code'], rtn['msg'] = ['ERROR-get_netstat_rn', $!.to_s.strip]
   end
   return rtn
 end
 
 # ------------------------------
 # FUNCTION:  Get iostat information.
-# Return { <info> => <value>, ... }
+# Return {
+#          avg-cpu => {key => val, ...},
+#          Device => { dev => {key => val, ...}, ...}
+#   }
 # Expected 'iostat -x 1 2' output format:
 # (Ignoring the first set, and only picking up the second)
 #  ...
 # avg-cpu:  %user   %nice %system %iowait  %steal   %idle
 #            0.28    0.00    0.12    0.07    0.00   99.53
 #
-# Device:  rrqm/s wrqm/s r/s  w/s  rsec/s wsec/s avgrq-sz avgqu-sz await svctm %util
-# sdb      0.00   0.00   0.00 0.00 0.00   0.00   48.38    0.00     2.86  2.29  0.00
-# sda      0.00   2.54   0.00 2.07 0.11   36.89  17.79    0.07     32.05 4.11  0.85
+# Device: rrqm/s wrqm/s r/s w/s rsec/s wsec/s avgrq-sz avgqu-sz await svctm %util
+# sdb 0.00 0.00 0.00 0.00 0.00 0.00  48.38 0.00 2.86  2.29 0.00
+# sda 0.00 2.54 0.00 2.07 0.11 36.89 17.79 0.07 32.05 4.11 0.85
 #  ...
+# NOTES:
+#
+#   CPU ...
+#   %user - Show the percentage of CPU utilization that occurred while
+#           executing at the user level (application).
+#   %nice - Show the percentage of CPU utilization that occurred while
+#           executing at the user level with nice priority.
+#   %system - Show the percentage of CPU utilization that occurred while
+#             executing at the system level (kernel).
+#   %iowait - Show the percentage of time that the CPU or CPUs were idle during
+#             which the system had an outstanding  disk  I/O request.
+#   %steal - Show  the  percentage of time spent in involuntary wait by the
+#            virtual CPU or CPUs while the hypervisor was ser- vicing another
+#            virtual processor.
+#   %idle - Show the percentage of time that the CPU or CPUs were idle and the
+#           system did not have an outstanding  disk  I/O request.
+#
+#   Devices ...
+#   rrqm/s, wrqm/s - read/write requests merged per sec.
+#   r/s, w/s - read/write requests per sec.
+#   avgrq-sz - average size (in sectors) of the requests that were issued to
+#              device.
+#   avgqu-sz - average queue length of the requests that were issued to device.
+#   await - average time (in ms) between when a request is issued and when it
+#           is completed (time in queue + time for device to service request).
+#   svctm - average service time (in ms) for I/O requests that were issued to
+#           the device.
+#   %util - percentage of CPU time during which the device was servicing
+#           requests.  100% means the device is fully saturated.
 # ------------------------------
 def get_iostat()
   rtn = {
     'code' => 'OK',
     'msg' => nil,
-    'res' => { 'avg-cpu' => {}, 'Device' => {}, 'item_dev' => nil }
+    'res' => { 'avg-cpu' => {}, 'Device' => {} }
   }
   begin
     # Cycle until find '^avg-cpu:', then capture.  Then look for '^Device:',
@@ -354,40 +591,31 @@ def get_iostat()
         else
           if cptr_cpu
             # Only grab one line after "avg-cpu:" ...
-            count = 0
-            # Matching CPU attr to CPU keys list found earlier ...
-            l.split(/\s+/).each { |i|
-              rtn['res']['avg-cpu'][item_cpu[count]] = i
-              count += 1
-            }
+            # Matching CPU values to CPU keys list found earlier ...
+            rtn['res']['avg-cpu'] = map_k_to_v(item_cpu, l.split(/\s+/))
             cptr_cpu = false
           elsif cptr_dev
             # Keep grabbing device info until find blank line ...
             if l == ''
               cptr_dev = false
             else
-              larr = l.split(/\s+/)
-              rtn['res']['Device'][larr[0]] = {}
-              count = 0
-              # Matching DEV attr to DEV keys list found earlier ...
-              larr.slice(1..-1).each { |i|
-                rtn['res']['Device'][larr[0]][item_dev[count]] = i
-                count += 1
-              }
+              la = l.split(/\s+/)
+              # Matching DEV values to DEV keys list found earlier ...
+              rtn['res']['Device'][la[0]] = map_k_to_v(item_dev, la.slice(1..-1))
             end
           end
         end
       end
     }
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = ['ERROR-get_iostat', $!.to_s.strip]
   end
   return rtn
 end
 
 # ------------------------------
 # FUNCTION:  Get DMI information.  Specifically, "System Information".
-# Return { <info> => <value>, ... }
+# Return { key => val }
 # Expected 'dmidecode' output format:
 #  ...
 #  System Information
@@ -433,7 +661,37 @@ def get_dmi_system_information()
       end
     }
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = ['ERROR-get_dmi_system_information', $!.to_s.strip]
+  end
+  return rtn
+end
+
+# -----------------------------------
+# FUNCTION:  Get sysctl info.
+# Return { key => val }
+# Expected 'sysctl -a' output format:
+#   <key> = <value>
+# -----------------------------------
+def get_sysctl_a()
+  rtn = {
+    'code' => 'OK',
+    'msg' => nil,
+    'res' => {}
+  }
+  begin
+    IO.popen('sysctl -a 2>&1', 'r').each_line { |l|
+      l.strip!
+      if not l == '' and /=/.match(l)
+        k, v = l.split('=').map { |i|
+          ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
+        }
+        next if k == '' or v == ''
+        rtn['res'][k] = [] if not rtn['res'].has_key?(k)
+        rtn['res'][k] << v
+      end
+    }
+    rescue
+      rtn['code'], rtn['msg'] = ['ERROR-get_sysctl_a', $!.to_s.strip]
   end
   return rtn
 end
@@ -441,24 +699,45 @@ end
 # ------------------------------
 # FUNCTION:  Get process(es) info.
 # Return {
+#   'pkeys' => {
+#     <pid:user:lstart> => [ i_info, ... ],
+#   },
 #   'command' => {
-#     cmd => [ [pid,ppid,user,rsz_kb,vsz_kb,start_time,cmd], ... ],
+#     cmd => [ i_info, ... ],
 #   },
 #   'command_count' => {
 #     cmd => <count from ps>,
 #   },
 #   'pid' => {
-#     pid => [ [pid,ppid,user,rsz_kb,vsz_kb,start_time,cmd], ... ],
+#     pid => [ i_info, ... ],
 #   },
 #   'ppid' => {
 #     pid => [ <self pid>, <child pid1>, <child pid2>, ... ],
 #   },
 # }.
+# ... where i_info is [pid,ppid,user,rsz_kb,vsz_kb,start_time,stat,cmd].
 # Expected 'ps' output format:
-#   <id> <parent> <user> <rsz> <vsz> <start time> <cmd>
+#   <id> <parent> <user> <rsz> <vsz> <start time> <stat> <cmd>
 # First line will have something like this ...
 #   PID  PPID USER       RSS    VSZ START COMMAND
 # ... to be ignored.
+# NOTES:
+#   stat -
+#     D - Uninterruptible sleep (usually IO)
+#     R - Running or runnable (on run queue)
+#     S - Interruptible sleep (waiting for an event to complete)
+#     T - Stopped, either by a job control signal or because it is being traced.
+#     W - paging (not valid since the 2.6.xx kernel)
+#     X - dead (should never be seen)
+#     Z - Defunct ("zombie") process, terminated but not reaped by its parent.
+#   stat (additional info if BSD format) -
+#     < - high-priority (not nice to other users)
+#     N - low-priority (nice to other users)
+#     L - has pages locked into memory (for real-time and custom IO)
+#     s - is a session leader
+#     l - is multi-threaded (using CLONE_THREAD, like NPTL pthreads do)
+#     + - is in the foreground process group
+
 # ------------------------------
 def get_processes()
   rtn = {
@@ -475,7 +754,7 @@ def get_processes()
   begin
     lstart_zone = Time.new.zone
     # Ignore first line ...
-    IO.popen('ps axwww -o pid,ppid,user,rsz,vsz,lstart,command 2>&1', 'r').readlines.slice(1..-1).each { |l|
+    IO.popen('ps axwww -o pid,ppid,user,rsz,vsz,lstart,stat,command 2>&1', 'r').readlines.slice(1..-1).each { |l|
       i = l.strip.split(/\s+/)
       #
       # Filter out 'this' process and its children ...
@@ -483,7 +762,7 @@ def get_processes()
       if i[0].to_i != @pid && i[1].to_i != @pid
         i_pid  = i[0]
         i_ppid = i[1]
-        i_cmd  = i.slice(10..-1).join(' ')
+        i_cmd  = i.slice(11..-1).join(' ')
         i_info = {
           'pid'        => i[0],
           'ppid'       => i[1],
@@ -491,15 +770,14 @@ def get_processes()
           'rsz'        => i[3],
           'vsz'        => i[4],
           'start_time' => "#{i.slice(5..9).join(' ')} #{lstart_zone}",
+          'stat'       => i[10],
           'command'    => i_cmd,
         }
         #
         # 'pkeys'.  Primary key to each proc is pid + user + lstart ...
         #
         pkey = "#{i_info['pid']}:#{i_info['user']}:#{i_info['start_time']}"
-        rtn['res']['pkeys'][pkey] = [] \
-          if not rtn['res']['pkeys'].has_key?(pkey)
-        rtn['res']['pkeys'][pkey] << i_info
+        rtn['res']['pkeys'][pkey] = i_info
         #
         # 'command' ...
         #
@@ -529,7 +807,7 @@ def get_processes()
       end
     }
     rescue
-      rtn['code'], rtn['msg'] = ['ERROR', $!.to_s.strip]
+      rtn['code'], rtn['msg'] = ['ERROR-get_processes', $!.to_s.strip]
   end
   return rtn
 end
@@ -548,11 +826,12 @@ if $0 == __FILE__
 
   require 'yaml'
 
-  print "Content-type: text/html\n\n"
+  print "Content-type: text/plain\n\n"
 
   m5 = M5.new
-  (['pid'] + m5.info_methods).each { |m|
-    puts "<h3>#{m}</h3>" + "<pre>" + eval ( "m5.#{m}.to_yaml" ) + "</pre>"
+  hdr_ln = "---------------------------------------------------------------"
+  (['pid','init_time'] + m5.info_methods).each { |m|
+    puts hdr_ln, m, hdr_ln, eval( "m5.#{m}.to_yaml" )
   }
 
 end
