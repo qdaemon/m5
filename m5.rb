@@ -9,14 +9,14 @@
 # lookup, training materials, etc.  They are in no way my own, though I claim
 # full responsibilities for any errors.
 #
-# +  __method__ is used in functions to retrieve name of "this" function in
-# the @mec class variable.  This only works with ruby version >= 1.8.7.
+# +  __method__ is used in functions to retrieve name of "this" function.  This
+# only works with ruby version >= 1.8.7.
 #
 
 class M5
 # ---------------------------------------------------------------------
 
-attr_reader :pid, :init_time, :mec, :info_methods, :settings, :raw_data
+attr_reader :pid, :init_time, :mec, :moc, :info_methods, :settings, :raw_data
 #attr_writer :nothing_yet
 
 # -----------------------------------
@@ -34,6 +34,9 @@ def initialize()
 
   # Method Error Code.  To be eval'ed in functions ...
   @mec = '"ERROR/#{__method__}"'
+
+  # Method OK Code.  To be eval'ed in functions ...
+  @moc = '"OK/#{__method__}"'
 
   # List of methods that pulls systems stats ...
   @info_methods = %w(
@@ -57,9 +60,10 @@ def initialize()
   # Some reasonable settings.  Any may be override with ENV of the same name
   # that begins with "M5_<setting>" ...
   @settings = {
-    'ACTION_TIMEOUT'   => 10,    # Max time to run any action.
-    'ENABLE_RAW_PRINT' => false, # Print out raw_data.
-    'MAX_THREADS'      => 4,     # Max number of threads.
+    'ACTION_TIMEOUT'   => 10,               # Max time to run any action.
+    'ENABLE_RAW_PRINT' => false,            # Print out raw_data.
+    'MAX_THREADS'      => 4,                # Max number of threads.
+    'WORK_DIRECTORY'   => '/tmp/m5',
   }
 
   # Raw data ...
@@ -97,12 +101,13 @@ end
 # -----------------------------------
 def get_os_release()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => []
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       # Supported (in order below):  Redhat, SuSE, Ubuntu ...
       %w(
@@ -111,9 +116,9 @@ def get_os_release()
         /etc/lsb-release
       ).each { |f|
         if FileTest.exist?(f)
-          @raw_data[f] = []
+          @raw_data[m_name] = []
           rtn['res'] = File.open(f, 'r').readlines.map { |l|
-            @raw_data[f] << l
+            @raw_data[m_name] << l
             l.strip! ; ( l == '' ? nil : l )
           }.compact
           break
@@ -139,17 +144,17 @@ end
 # ------------------------------
 def get_uname()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => []
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      p = 'uname -snrvm'
-      @raw_data[p] = []
-      rtn['res'] = IO.popen("#{p} 2>&1", 'r').readlines.map { |l|
-        @raw_data[p] << l
+      @raw_data[m_name] = []
+      rtn['res'] = IO.popen('uname -snrvm 2>&1', 'r').readlines.map { |l|
+        @raw_data[m_name] << l
         l.strip! ; ( l == '' ? nil : l )
       }.compact
     end
@@ -174,17 +179,17 @@ end
 # ------------------------------
 def get_uptime()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => {'uptime' => nil, 'idle' => nil}
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      f = '/proc/uptime'
-      @raw_data[f] = []
-      File.open(f, 'r' ).each_line { |l|
-        @raw_data[f] << l
+      @raw_data[m_name] = []
+      File.open('/proc/uptime', 'r' ).each_line { |l|
+        @raw_data[m_name] << l
         l.strip!
         if /^[0-9]+/.match(l)
           upt, idl = l.split(/\s+/)
@@ -220,17 +225,17 @@ end
 # ------------------------------
 def get_loadavg()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => {'m1' => nil, 'm5' => nil, 'm15' => nil}
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      f = '/proc/loadavg'
-      @raw_data[f] = []
-      File.open(f, 'r').each_line { |l|
-        @raw_data[f] << l
+      @raw_data[m_name] = []
+      File.open('/proc/loadavg', 'r').each_line { |l|
+        @raw_data[m_name] << l
         l.strip!
         if /^[0-9]+/.match(l)
           rtn['res']['m1'], rtn['res']['m5'], rtn['res']['m15'],
@@ -255,17 +260,17 @@ end
 # -----------------------------------
 def get_cpuinfo()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => {}
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      f = '/proc/cpuinfo'
-      @raw_data[f] = []
-      File.open(f, 'r').each_line { |l|
-        @raw_data[f] << l
+      @raw_data[m_name] = []
+      File.open('/proc/cpuinfo', 'r').each_line { |l|
+        @raw_data[m_name] << l
         l.strip!
         if not l == ''
           k, v = l.split(':').map { |i|
@@ -304,17 +309,17 @@ end
 # ------------------------------
 def get_meminfo()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => {}
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      f = '/proc/meminfo'
-      @raw_data[f] = []
-      File.open(f, 'r').each_line { |l|
-        @raw_data[f] << l
+      @raw_data[m_name] = []
+      File.open('/proc/meminfo', 'r').each_line { |l|
+        @raw_data[m_name] << l
         l.strip!
         if not l == ''
           k, v = l.split(':').map { |i|
@@ -345,17 +350,17 @@ end
 # -----------------------------------
 def get_vmstat()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => {}
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      f = '/proc/vmstat'
-      @raw_data[f] = []
-      File.open(f, 'r').each_line { |l|
-        @raw_data[f] << l
+      @raw_data[m_name] = []
+      File.open('/proc/vmstat', 'r').each_line { |l|
+        @raw_data[m_name] << l
         l.strip!
         if not l == ''
           k, v = l.split(/\s+/).map { |i|
@@ -387,17 +392,17 @@ end
 # ------------------------------
 def get_ip_bindings()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => {}
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      p = 'ip address show'
-      @raw_data[p] = []
-      IO.popen("#{p} 2>&1", 'r').each_line { |l|
-        @raw_data[p] << l
+      @raw_data[m_name] = []
+      IO.popen('ip address show 2>&1', 'r').each_line { |l|
+        @raw_data[m_name] << l
         l.strip!
         if /\binet\b/.match(l)
           l_arr = l.split(/\s+/)
@@ -453,21 +458,21 @@ end
 # ------------------------------
 def get_netstat_i()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => {}
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       # Cycle until find '^Iface:', then start capture on next line.
       # Continue until first blank line ...
       start_cptr = false
       item_iface = nil
-      p = 'netstat -i'
-      @raw_data[p] = []
-      IO.popen("#{p} 2>&1", 'r').each_line { |l|
-        @raw_data[p] << l
+      @raw_data[m_name] = []
+      IO.popen('netstat -i 2>&1', 'r').each_line { |l|
+        @raw_data[m_name] << l
         l.strip!
         if not l == ''
           if /^Iface\b/.match(l)
@@ -527,18 +532,18 @@ end
 # ------------------------------
 def get_netstat_pant()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => {}
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      p = 'netstat -pant'
-      @raw_data[p] = []
+      @raw_data[m_name] = []
       # Doing count for everyone else but LISTEN ...
-      IO.popen("#{p} 2>&1", 'r').each_line { |l|
-        @raw_data[p] << l
+      IO.popen('netstat -pant 2>&1', 'r').each_line { |l|
+        @raw_data[m_name] << l
         if /^tcp\s+.*$/.match(l)
           line = l.strip.split(/\s+/)
           state = line[5]
@@ -605,21 +610,21 @@ end
 # ------------------------------
 def get_netstat_rn()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => {}
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      p = 'netstat -rn'
-      @raw_data[p] = []
       # Cycle until find '^Iface:', then start capture on next line.  Continue
       # until first blank line ...
       start_cptr = false
       item_route = nil
-      IO.popen("#{p} 2>&1", 'r').each_line { |l|
-        @raw_data[p] << l
+      @raw_data[m_name] = []
+      IO.popen('netstat -rn 2>&1', 'r').each_line { |l|
+        @raw_data[m_name] << l
         l.strip!
         if not l == ''
           if /^Destination\b/.match(l)
@@ -693,22 +698,22 @@ end
 # ------------------------------
 def get_iostat()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => { 'avg-cpu' => {}, 'Device' => {} }
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      p = 'iostat -x 1 2'
-      @raw_data[p] = []
       # Cycle until find '^avg-cpu:', then capture.  Then look for '^Device:',
       # then capture ...
       fnd_cpu, cptr_cpu, item_cpu = [ false, false, nil ]
       fnd_dev, cptr_dev, item_dev = [ false, false, nil ]
       set_found = 0
-      IO.popen("#{p} 2>&1", 'r').each_line { |l|
-        @raw_data[p] << l
+      @raw_data[m_name] = []
+      IO.popen('iostat -x 1 2 2>&1', 'r').each_line { |l|
+        @raw_data[m_name] << l
         l.strip!
         set_found += 1 if /^avg-cpu:/.match(l)
         if set_found == 2 # Only work on second set!
@@ -772,22 +777,22 @@ end
 # ------------------------------
 def get_dmidecode()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => {}
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      p = 'dmidecode'
-      @raw_data[p] = []
       # Cycle until find System Information, then capture.  Stop after seeing
       # '^Handle' or after 10 lines ...
       found = false
       start_capture = false
       lines_gotten = 0
-      IO.popen("#{p} 2>&1", 'r').each_line { |l|
-        @raw_data[p] << l
+      @raw_data[m_name] = []
+      IO.popen('dmidecode 2>&1', 'r').each_line { |l|
+        @raw_data[m_name] << l
         break if lines_gotten > 10
         l.strip!
         if /^System Information/.match(l)
@@ -825,17 +830,17 @@ end
 # -----------------------------------
 def get_sysctl_a()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => {}
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
-      p = 'sysctl -a'
-      @raw_data[p] = []
-      IO.popen("#{p} 2>&1", 'r').each_line { |l|
-        @raw_data[p] << l
+      @raw_data[m_name] = []
+      IO.popen('sysctl -a 2>&1', 'r').each_line { |l|
+        @raw_data[m_name] << l
         l.strip!
         if not l == '' and /=/.match(l)
           k, v = l.split('=').map { |i|
@@ -902,7 +907,7 @@ end
 # ------------------------------
 def get_processes()
   rtn = {
-    'code' => 'OK',
+    'code' => eval(@moc),
     'msg' => nil,
     'res' => {
       'pkeys'         => {},
@@ -914,12 +919,13 @@ def get_processes()
   }
   begin
     time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       p = 'ps axwww -o pid,ppid,user,rsz,vsz,stat,lstart,command'
-      @raw_data[p] = []
+      @raw_data[m_name] = []
       # Ignore first line ...
       IO.popen("#{p} 2>&1", 'r').readlines.slice(1..-1).each { |l|
-        @raw_data[p] << l
+        @raw_data[m_name] << l
         i = l.strip.split(/\s+/)
         #
         # Filter out 'this' process and its children ...
