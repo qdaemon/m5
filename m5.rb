@@ -5,12 +5,14 @@
 #
 # General note(s):
 #
+# + Requires ruby version >= 1.8.7
+#   - Using __method__ in functions to retrieve name of "this" function.
+#
+# + Yes, "eval" is used ...
+#
 # + Any "NOTES" information below has been gotten by way of man pages, web
 # lookup, training materials, etc.  They are in no way my own, though I claim
 # full responsibilities for any errors.
-#
-# +  __method__ is used in functions to retrieve name of "this" function.  This
-# only works with ruby version >= 1.8.7.
 #
 
 class M5
@@ -63,7 +65,7 @@ def initialize()
     'ACTION_TIMEOUT'   => 10,               # Max time to run any action.
     'ENABLE_RAW_PRINT' => false,            # Print out raw_data.
     'MAX_THREADS'      => 4,                # Max number of threads.
-    'WORK_DIRECTORY'   => '/tmp/m5',
+    'WORKDIR'          => '/var/m5',        # All temp and persist data.
   }
 
   # Raw data ...
@@ -296,16 +298,15 @@ end
 # FUNCTION:  Get memory info.
 # Return { key => val }
 # NOTES:
-#   A = buffers cache (memory is used by block device for e.g. file system
-#       meta data).
-#   B = cached cache = page cache (mem pages used to cache excutable files
-#       and data files by filesystem).
-#   C = Mem free = the memory system is yet to assign for use = how much
-#       memory that OS thinks is free
-#   D = buffers/cache free = the clean/inactive pages system is about to
-#       free + the memory system hasn't used
-#   A+B+C = D = the actual memory system can utilize at the moment = how much
-#       memory we should think is free
+#   A = Buffers - Memory is used by block device for e.g. file system
+#       meta data.
+#   B = Cached - Memory pages used to cache excutable and data files by FS.
+#   C = MemFree - Memory system is yet to assign for use.  How much memory
+#       that OS thinks is free.
+#   D = Buffers/Cache free = the clean/inactive pages system is about to
+#       free + the memory system hasn't used.
+#   A+B+C = D = Actual memory system can utilize at the moment.  How much
+#       memory we should think is free.
 # ------------------------------
 def get_meminfo()
   rtn = {
@@ -325,11 +326,20 @@ def get_meminfo()
           k, v = l.split(':').map { |i|
             ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
           }
-          next if k == '' or v == ''
-          rtn['res'][k] = [] if not rtn['res'].has_key?(k)
-          rtn['res'][k] << v
+          rtn['res'][k] = v if not ( k == '' or v == '' )
         end
       }
+    end
+    # Create TrueMemFree based on A+B+C (in the NOTES above).  Assume(!) values
+    # in kB ...
+    if rtn['res'].has_key?("Buffers") \
+      and rtn['res'].has_key?("Cached") \
+      and rtn['res'].has_key?("MemFree")
+        rtn['res']['TrueMemFree'] = (
+          rtn['res']["Buffers"].split(/\s+/)[0].to_i + \
+          rtn['res']["Cached"].split(/\s+/)[0].to_i + \
+          rtn['res']["MemFree"].split(/\s+/)[0].to_i
+        ).to_s + " kB"
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
@@ -345,6 +355,10 @@ end
 # FUNCTION:  Get vmstat info.
 # Return { key => val }
 # NOTES:  Some worthy keys to note ...
+#   Swap/Paging
+#     - Swap are pages which are not backed by a file (anonymous pages).
+#     - Pages which are backed by a file are subject to paging.
+#     - Unlike swapping, some amount of paging is normal and unavoidable.
 #   pgmajfault - Number of major faults the system has made since boot, those
 #                which have required loading a memory  page from disk.
 # -----------------------------------
@@ -366,9 +380,7 @@ def get_vmstat()
           k, v = l.split(/\s+/).map { |i|
             ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
           }
-          next if k == '' or v == ''
-          rtn['res'][k] = [] if not rtn['res'].has_key?(k)
-          rtn['res'][k] << v
+          rtn['res'][k] = v if not ( k == '' or v == '' )
         end
       }
     end
@@ -1012,57 +1024,155 @@ end # class M5
 #######################################################################
 
 if $0 == __FILE__
+# ---------------------------------------------------------------------
 
-  $stderr.reopen $stdout # Sending STDERR to STDOUT ...
-  $defout.sync = true    # Don't buffer I/O ...
+$stderr.reopen $stdout # Sending STDERR to STDOUT ...
+$defout.sync = true    # Don't buffer I/O ...
 
-  # Initializing ...
-  m5 = M5.new
+#
+# Initializing ...
+#
 
-  # All options are driven off CGI ...
-  require 'cgi'
-  cgi = CGI.new()
-  #
-  # Get CGI options:
-  #   - Lists are comma delimited.
-  #   - methods - list of valid info_methods.
-  #
-  cgi_methods = cgi.has_key?('methods') ? cgi['methods'].split(',') : []
-  cgi_print = cgi.has_key?('print') ? cgi['print'].split(',') : []
+script = File.basename($0) # "This" script name ...
+m5 = M5.new # Main data object ...
 
-  # Look for setting's ENV overrides ...
-  m5.settings.keys.each { |k|
-    m5_k = "M5_#{k}"
-    if ENV.has_key?(m5_k)
-      m5.settings[k] = ENV[m5_k] if ENV[m5_k] != ''
-    end
-  }
+# List of valid methods ...
+m5_prop = %w( pid init_time settings )
+m_valid = m5_prop + m5.info_methods
 
-  # Build methods list ...
-  m_valid = ['pid','init_time','settings'] + m5.info_methods
-  m_list = cgi_methods.map { |m| m_valid.include?(m) ? m : nil }.compact
-  m_list = m_valid if m_list.empty?
+#
+# Get CGI options ...
+#
 
-  # Exec methods list ...
-  m5_out = {}
-  threads = []
-  m_list.each { |met|
-    threads << Thread.new( met ) { |m|
-      m5_out[m] = eval("m5.#{m}")
-    }
-    while threads.find_all { |t| t.alive? }.length >= m5.settings['MAX_THREADS']
-      sleep(0.1)
-    end
-  }
-  threads.each { |t| t.join}
+require 'cgi'
+cgi = CGI.new()
+#
+# Get CGI options:
+#   - Lists are comma delimited.
+#   - methods - list of valid info_methods.
+#
+cgi_methods = cgi.has_key?('methods') ? cgi['methods'].split(',') : []
+cgi_print = cgi.has_key?('print') ? cgi['print'].split(',') : []
 
-  # Print out as necessary ...
-  if not cgi_print.empty?
-    require 'yaml'
-    print "Content-type: text/plain\n\n"
-    puts m5_out.to_yaml if cgi_print.include?('yaml')
-    puts m5.raw_data.to_yaml if cgi_print.include?('raw')
+#
+# Print help/usage as needed ...
+#
+
+if cgi_methods.include?('help') or cgi_methods.include?('usage')
+  puts <<END_OF_USAGE
+
+USAGE:
+
+  #{script} methods=<method(s) - comma delimit> print=<inspect,raw,yaml>
+
+Valid methods ...
+
+  help
+  usage
+
+#{m_valid.sort.map { |m| "  #{m}" }.join("\n")}
+
+EXAMPLE(S):
+
+  #{script} methods=help
+  #{script} methods=usage  # Same as help.
+  #{script} methods=get_uname,get_iostat print=raw
+  #{script} methods=pid,get_loadavg print=raw,yaml
+
+Settings that can have environment overrides ...
+
+#{m5.settings.keys.sort.map { |m| "  #{m}" }.join("\n")}
+
+END_OF_USAGE
+  exit(1)
+end
+
+#
+# Look for setting's ENV overrides ...
+#
+
+m5.settings.keys.each { |k|
+  m5_k = "M5_#{k}"
+  if ENV.has_key?(m5_k)
+    m5.settings[k] = ENV[m5_k] if ENV[m5_k] != ''
   end
+}
 
+#
+# Ensure WORKDIR exist.  If not create it ...
+#
+tmp_workdir = m5.settings['WORKDIR']
+tmp_workdir_found = if FileTest.exist?(tmp_workdir)
+  if FileTest.directory?(tmp_workdir)
+    true
+  else # Not a directory, delete it ...
+    File.delete(tmp_workdir)
+    false
+  end
+else
+  false
+end
+if not tmp_workdir_found
+  Dir.mkdir(tmp_workdir)
+end
+
+#
+# Build methods list to get ...
+#
+
+m_list = cgi_methods.map { |m|
+  if m_valid.include?(m) or m == "all"  # Check valid method or "all" ...
+    m
+  elsif m_valid.include?("get_#{m}")    # Short-hand label for method ...
+    "get_#{m}"
+  else
+    nil
+  end
+}.compact
+# Default to all if empty list or "all" ...
+m_list = m_valid if ( m_list.empty? or m_list.include?("all") )
+
+#
+# Exec methods ...
+#
+
+m5_out = {}
+threads = []
+m_list.each { |met|
+  threads << Thread.new( met ) { |m|
+    m5_out[m] = eval("m5.#{m}")
+  }
+  while threads.find_all { |t|
+    t.alive?
+  }.length >= m5.settings['MAX_THREADS']
+    sleep(0.1)
+  end
+}
+threads.each { |t| t.join}
+
+#
+# Save raw data ...
+#
+m5.raw_data.keys.each { |k|
+  f = File.open( "#{m5.settings['WORKDIR']}/file.#{k}", "w" )
+  m5.raw_data[k].each { |line| f.print line }
+  f.close
+}
+
+#
+# Print out if needed ...
+#
+
+if not cgi_print.empty?
+  require 'yaml'
+  print "Content-type: text/plain\n\n"
+  puts m5_out.inspect      if cgi_print.include?('inspect')
+  puts m5.raw_data.to_yaml if cgi_print.include?('raw')
+  puts m5_out.to_yaml      if cgi_print.include?('yaml')
+end
+
+exit(0)
+
+# ---------------------------------------------------------------------
 end
 
