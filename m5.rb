@@ -1154,8 +1154,8 @@ threads.each { |t| t.join}
 # Save raw data ...
 #
 m5.raw_data.keys.each { |k|
-  f = File.open( "#{m5.settings['WORKDIR']}/file.#{k}", "w" )
-  m5.raw_data[k].each { |line| f.print line }
+  f = File.open( "#{m5.settings['WORKDIR']}/raw.#{k}", "w" )
+  m5.raw_data[k].each { |line| f.puts line }
   f.close
 }
 
