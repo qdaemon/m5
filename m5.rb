@@ -14,6 +14,9 @@
 # lookup, training materials, etc.  They are in no way my own, though I claim
 # full responsibilities for any errors.
 #
+# + For some reason "cat <file>" works better than "File.open <file>" when
+# dealing with "/proc" FS.
+#
 
 class M5
 # ---------------------------------------------------------------------
@@ -64,19 +67,31 @@ def initialize()
   # that begins with "M5_<setting>" ...
   @settings = {
     'ACTION_TIMEOUT'   => 10,                 # Max time to run any action.
+    'CPUINFO_IGNORE'   => %r{
+      (
+        bogomips
+        | cpu\ MHz
+      )
+    }x,                                       # cpuinfo params to ignore.
     'DIFFLOG'          => '/var/m5/diff.log', # Where diffs are logged.
     'ERRLOG'           => '/var/m5/err.log',  # Where errors are logged.
     'DO_DIFF'          => false,              # Default is not to do diff.
     'MAX_THREADS'      => 4,                  # Max number of threads.
-    'SYSCTL_IGNORE'    => %w(
-      fs.dentry-state
-      fs.file-nr
-      fs.inode-nr
-      fs.inode-state
-      kernel.pty.nr
-      kernel.random.entropy_avail
-      kernel.random.uuid
-    ),                                        # sysctl params to ignore.
+    'SYSCTL_IGNORE'    => %r{
+      (
+        \berror\b
+        | permission\ denied
+        | \.gc_timeout$
+        | fs.dentry-state
+        | fs.file-nr
+        | fs.inode-(nr|state)
+        | fs.quota.syncs
+        | kernel.pty.nr
+        | kernel.random.(boot_id|entropy_avail|uuid)
+        | net.ipv..conf.*.(accept_dad|disable_ipv.|flush)
+        | net.ipv..route.flush$
+      )
+    }x,                                       # sysctl params to ignore.
     'WORKDIR'          => '/var/m5',          # All temp and persist data.
   }
 
@@ -176,7 +191,9 @@ def file_diff( tag, file_new, file_old )
   begin
     m_name = "#{__method__}" # This function's (method) name ...
     tag = "#{tag}-#{(0..8).map{ charset.to_a[rand(charset.size)] }.join}"
-    IO.popen("diff #{file_new} #{file_old}").each_line { |l| rtn << l.strip }
+    IO.popen("diff #{file_new} #{file_old} 2>/dev/null").each_line { |l|
+      rtn << l.strip
+    }
     if not rtn.empty? # Write out diffs if any ...
       diff_log = File.open( @settings['DIFFLOG'], 'a+' )
       rtn.each { |l| diff_log.puts "#{time_now}::#{tag}::#{l}" }
@@ -334,7 +351,7 @@ def get_uptime( do_diff=false )
     m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
-      File.open('/proc/uptime', 'r' ).each_line { |l|
+      IO.popen('cat /proc/uptime 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
         if /^[0-9]+/.match(l)
@@ -384,7 +401,7 @@ def get_loadavg( do_diff=false )
     m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
-      File.open('/proc/loadavg', 'r').each_line { |l|
+      IO.popen('cat /proc/loadavg 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
         if /^[0-9]+/.match(l)
@@ -424,7 +441,8 @@ def get_cpuinfo( do_diff=true )
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       File.open('/proc/cpuinfo', 'r').each_line { |l|
-        @raw_data[m_name] << l
+        @raw_data[m_name] << l \
+          if not @settings['CPUINFO_IGNORE'].match(l.split(':')[0].strip)
         l.strip!
         if not l == ''
           k, v = l.split(':').map { |i|
@@ -475,7 +493,7 @@ def get_meminfo( do_diff=false )
     m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
-      File.open('/proc/meminfo', 'r').each_line { |l|
+      IO.popen('cat /proc/meminfo 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
         if not l == ''
@@ -713,7 +731,7 @@ end
 #               sent.
 #     UNKNOWN - The state of the socket is unknown.
 # ------------------------------
-def get_netstat_pant( do_diff=true )
+def get_netstat_pant( do_diff=false )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -1039,9 +1057,9 @@ def get_sysctl_a( do_diff=true )
     m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
-      IO.popen('sysctl -a 2>&1 | sort').each_line { |l|
+      IO.popen('sysctl -a 2>/dev/null | sort').each_line { |l|
         @raw_data[m_name] << l \
-          if not @settings['SYSCTL_IGNORE'].include?(l.split('=')[0].strip)
+          if not @settings['SYSCTL_IGNORE'].match(l.split('=')[0].strip)
         l.strip!
         if not l == '' and /=/.match(l)
           k, v = l.split('=').map { |i|
