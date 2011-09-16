@@ -18,8 +18,9 @@
 class M5
 # ---------------------------------------------------------------------
 
-attr_reader :pid, :init_time, :mec, :moc, :info_methods, :settings, :raw_data
-#attr_writer :nothing_yet
+attr_reader :pid, :init_time, :mec, :moc, :info_methods, :settings,
+            :settings_type_int, :raw_data, :charset, :time_fmt
+attr_writer :settings, :settings_type_int
 
 # -----------------------------------
 # FUNCTION:  Class initializer.
@@ -62,15 +63,71 @@ def initialize()
   # Some reasonable settings.  Any may be override with ENV of the same name
   # that begins with "M5_<setting>" ...
   @settings = {
-    'ACTION_TIMEOUT'   => 10,               # Max time to run any action.
-    'ENABLE_RAW_PRINT' => false,            # Print out raw_data.
-    'MAX_THREADS'      => 4,                # Max number of threads.
-    'WORKDIR'          => '/var/m5',        # All temp and persist data.
+    'ACTION_TIMEOUT'   => 10,                 # Max time to run any action.
+    'DIFFLOG'          => '/var/m5/diff.log', # Where diffs are logged.
+    'ERRLOG'           => '/var/m5/err.log',  # Where errors are logged.
+    'DO_DIFF'          => false,              # Default is not to do diff.
+    'MAX_THREADS'      => 4,                  # Max number of threads.
+    'SYSCTL_IGNORE'    => %w(
+      fs.dentry-state
+      fs.file-nr
+      fs.inode-nr
+      fs.inode-state
+      kernel.pty.nr
+      kernel.random.entropy_avail
+      kernel.random.uuid
+    ),                                        # sysctl params to ignore.
+    'WORKDIR'          => '/var/m5',          # All temp and persist data.
   }
+
+  # Setting types is used in converting ENV overrides to proper type ...
+  @settings_type_int = %w(
+    ACTION_TIMEOUT
+    MAX_THREADS
+  )
 
   # Raw data ...
   @raw_data = {}
 
+  # Alphanumeric set used in random generation ...
+  @charset = ('a'..'z').to_a + ('A'..'Z').to_a + (0..9).to_a
+
+  # Standard time format:  F = %Y-%m-%d (the ISO 8601 date format),
+  #   T = 24-hour (%H:%M:%S) ...
+  @time_fmt = '%F.%T%z'
+
+end
+
+## -----------------------------------
+## FUNCTION:  Print out our standard time format.
+## Standard time format: %F.%T.<millisec>%z
+##   F = %Y-%m-%d (the ISO 8601 date format)
+##   T = 24-hour (%H:%M:%S)
+##   z = Time zone as  hour offset from UTC (e.g. +0900)
+## -----------------------------------
+#def time_now
+#  dtg = Time.new
+#  return dtg.strftime(@time_fmt) \
+#    + '.' + sprintf("%0.3f", dtg ).split('.')[1] \
+#    + dtg.strftime("%z")
+#end
+def time_now
+  return Time.new.strftime(@time_fmt)
+end
+
+# -----------------------------------
+# FUNCTION:  Log errors ...
+# -----------------------------------
+def log_error( tag, data, log_file=@settings['ERRLOG'] )
+  begin
+    m_name = "#{__method__}" # This function's (method) name ...
+    tag = "#{tag}-#{(0..8).map{ charset.to_a[rand(charset.size)] }.join}"
+    log = File.open(log_file, 'a+')
+    data.each { |l| log.puts "#{time_now}::#{tag}::#{l}" }
+    rescue
+      puts "FATA/#{m_name}::#{tag}::#{$!.to_s.strip}"
+      exit(1)
+  end
 end
 
 # -----------------------------------
@@ -78,7 +135,14 @@ end
 # Return <change in time from current> in ms as %0.3f string format.
 # -----------------------------------
 def time_since( dtg )
-  return sprintf("%0.6f microsec", Time.new - dtg)
+  return begin
+    m_name = "#{__method__}" # This function's (method) name ...
+    sprintf("%0.6f microsec", Time.new - dtg)
+    rescue
+      # Log but ignore ...
+      log_error( m_name, [$!.to_s.strip] )
+      sprintf("%0.6f microsec", -999999 )
+  end
 end
 
 # -----------------------------------
@@ -89,23 +153,96 @@ end
 # -----------------------------------
 def map_k_to_v( list_k, list_v )
   rtn = {}
-  if list_k.length == list_v.length
-    count = 0 ; list_k.each { |k| rtn[k] = list_v[count] ; count += 1 }
-  else
-    rtn[eval(@mec)] = 'Keys and values lists are not of same length'
+  begin
+    m_name = "#{__method__}" # This function's (method) name ...
+    if list_k.length == list_v.length
+      count = 0 ; list_k.each { |k| rtn[k] = list_v[count] ; count += 1 }
+    else
+      rtn[eval(@mec)] = 'Keys and values lists are not of same length'
+    end
+    rescue
+      # Log but ignore ...
+      log_error( m_name, [$!.to_s.strip] )
   end
   return rtn
 end
 
 # -----------------------------------
-# FUNCTION:  Get O/S release info.
-# Return [ <OS release info> ]
+# FUNCTION:  Compare new file to old file.  Write out diffs.
+# Return [ diffs ]
 # -----------------------------------
-def get_os_release()
+def file_diff( tag, file_new, file_old )
+  rtn = []
+  begin
+    m_name = "#{__method__}" # This function's (method) name ...
+    tag = "#{tag}-#{(0..8).map{ charset.to_a[rand(charset.size)] }.join}"
+    IO.popen("diff #{file_new} #{file_old}").each_line { |l| rtn << l.strip }
+    if not rtn.empty? # Write out diffs if any ...
+      diff_log = File.open( @settings['DIFFLOG'], 'a+' )
+      rtn.each { |l| diff_log.puts "#{time_now}::#{tag}::#{l}" }
+      diff_log.close
+    end
+    rescue
+      # Log but ignore ...
+      log_error( m_name, [$!.to_s.strip] )
+  end
+  return rtn
+end
+
+# -----------------------------------
+# FUNCTION:  Save last to current, then dump new data to last.
+# Return
+#   {
+#     'last'     => '/path/to/last',
+#     'current'  => '/path/to/current',
+#     'diff'     => nil or <diff>
+#   }
+# -----------------------------------
+def save_last_current( method_name, data, do_diff=@settings['DO_DIFF'] )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => []
+    'res' => {
+      'last'     => "#{@settings['WORKDIR']}/raw.#{method_name}.last",
+      'current'  => "#{@settings['WORKDIR']}/raw.#{method_name}.current",
+      'diff'     => nil
+    }
+  }
+  begin
+    m_name = "#{__method__}" # This function's (method) name ...
+    # Save current to last ...
+    system( "cat #{rtn['res']['current']} > #{rtn['res']['last']} 2>/dev/null" )
+    # Save data to current ...
+    f = File.open( rtn['res']['current'], "w+" )
+    data.each { |line| f.puts line }
+    f.close
+    # Run diff if required ...
+    rtn['res']['diff'] = \
+      file_diff(method_name, rtn['res']['current'], rtn['res']['last']) \
+      if do_diff
+    rescue
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
+  end
+  return rtn
+end
+
+# *********************************************************************
+#
+# Data gathering functions below here ...
+#
+# *********************************************************************
+
+# -----------------------------------
+# FUNCTION:  Get O/S release info.
+# Return [ <OS release info> ]
+# -----------------------------------
+def get_os_release( do_diff=true )
+  rtn = {
+    'code' => eval(@moc),
+    'msg'  => nil,
+    'res'  => [],
+    'res_save' => nil
   }
   begin
     time_start = Time.new
@@ -132,9 +269,12 @@ def get_os_release()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -144,18 +284,19 @@ end
 # NOTES:  Expected 'uname' output format:
 #   <os_name> <host_name> <os_rel> <os_ver(3..-2)> <hdw_class(-1)>
 # ------------------------------
-def get_uname()
+def get_uname( do_diff=true )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => []
+    'res' => [],
+    'res_save' => nil
   }
   begin
     time_start = Time.new
     m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
-      rtn['res'] = IO.popen('uname -snrvm 2>&1', 'r').readlines.map { |l|
+      rtn['res'] = IO.popen('uname -snrvm 2>&1').readlines.map { |l|
         @raw_data[m_name] << l
         l.strip! ; ( l == '' ? nil : l )
       }.compact
@@ -166,7 +307,9 @@ def get_uname()
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -179,11 +322,12 @@ end
 #   as well as the amount of time since then that the system has been idle.
 #   Both are given as floating-point values, in seconds.
 # ------------------------------
-def get_uptime()
+def get_uptime( do_diff=false )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => {'uptime' => nil, 'idle' => nil}
+    'res' => {'uptime' => nil, 'idle' => nil},
+    'res_save' => nil
   }
   begin
     time_start = Time.new
@@ -205,9 +349,12 @@ def get_uptime()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -225,11 +372,12 @@ end
 #   processes on the system. The final entry is the process ID of the process
 #   that most recently ran.
 # ------------------------------
-def get_loadavg()
+def get_loadavg( do_diff=false )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => {'m1' => nil, 'm5' => nil, 'm15' => nil}
+    'res' => {'m1' => nil, 'm5' => nil, 'm15' => nil},
+    'res_save' => nil
   }
   begin
     time_start = Time.new
@@ -250,9 +398,12 @@ def get_loadavg()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -260,11 +411,12 @@ end
 # FUNCTION:  Get CPU info.
 # Return { key => val }
 # -----------------------------------
-def get_cpuinfo()
+def get_cpuinfo( do_diff=true )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => {}
+    'res' => {},
+    'res_save' => nil
   }
   begin
     time_start = Time.new
@@ -288,9 +440,12 @@ def get_cpuinfo()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -308,11 +463,12 @@ end
 #   A+B+C = D = Actual memory system can utilize at the moment.  How much
 #       memory we should think is free.
 # ------------------------------
-def get_meminfo()
+def get_meminfo( do_diff=false )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => {}
+    'res' => {},
+    'res_save' => nil
   }
   begin
     time_start = Time.new
@@ -345,9 +501,12 @@ def get_meminfo()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -362,11 +521,12 @@ end
 #   pgmajfault - Number of major faults the system has made since boot, those
 #                which have required loading a memory  page from disk.
 # -----------------------------------
-def get_vmstat()
+def get_vmstat( do_diff=false )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => {}
+    'res' => {},
+    'res_save' => nil
   }
   begin
     time_start = Time.new
@@ -388,9 +548,12 @@ def get_vmstat()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -402,18 +565,19 @@ end
 # Expected '/sbin/ip address show|grep inet|grep -v 127.0.0.1' output format:
 #   inet <addr/cdir> brd <broadcast addr> scope <scope> <interface>
 # ------------------------------
-def get_ip_bindings()
+def get_ip_bindings( do_diff=true )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => {}
+    'res' => {},
+    'res_save' => nil
   }
   begin
     time_start = Time.new
     m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
-      IO.popen('ip address show 2>&1', 'r').each_line { |l|
+      IO.popen('ip address show 2>&1').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
         if /\binet\b/.match(l)
@@ -429,9 +593,12 @@ def get_ip_bindings()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -468,11 +635,12 @@ end
 #     m - Master
 #     s - Slave
 # ------------------------------
-def get_netstat_i()
+def get_netstat_i( do_diff=false )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => {}
+    'res' => {},
+    'res_save' => nil
   }
   begin
     time_start = Time.new
@@ -483,7 +651,7 @@ def get_netstat_i()
       start_cptr = false
       item_iface = nil
       @raw_data[m_name] = []
-      IO.popen('netstat -i 2>&1', 'r').each_line { |l|
+      IO.popen('netstat -i 2>&1').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
         if not l == ''
@@ -505,9 +673,12 @@ def get_netstat_i()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -542,11 +713,12 @@ end
 #               sent.
 #     UNKNOWN - The state of the socket is unknown.
 # ------------------------------
-def get_netstat_pant()
+def get_netstat_pant( do_diff=true )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => {}
+    'res' => {},
+    'res_save' => nil
   }
   begin
     time_start = Time.new
@@ -554,7 +726,7 @@ def get_netstat_pant()
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       # Doing count for everyone else but LISTEN ...
-      IO.popen('netstat -pant 2>&1', 'r').each_line { |l|
+      IO.popen('netstat -pant 2>&1').each_line { |l|
         @raw_data[m_name] << l
         if /^tcp\s+.*$/.match(l)
           line = l.strip.split(/\s+/)
@@ -582,9 +754,12 @@ def get_netstat_pant()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -620,11 +795,12 @@ end
 #     D - this route is dynamically created.
 #     ! - the route is a reject route and data will be dropped.
 # ------------------------------
-def get_netstat_rn()
+def get_netstat_rn( do_diff=true )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => {}
+    'res' => {},
+    'res_save' => nil
   }
   begin
     time_start = Time.new
@@ -635,7 +811,7 @@ def get_netstat_rn()
       start_cptr = false
       item_route = nil
       @raw_data[m_name] = []
-      IO.popen('netstat -rn 2>&1', 'r').each_line { |l|
+      IO.popen('netstat -rn 2>&1').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
         if not l == ''
@@ -656,9 +832,12 @@ def get_netstat_rn()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -708,11 +887,12 @@ end
 #   %util - percentage of CPU time during which the device was servicing
 #           requests.  100% means the device is fully saturated.
 # ------------------------------
-def get_iostat()
+def get_iostat( do_diff=false )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => { 'avg-cpu' => {}, 'Device' => {} }
+    'res' => { 'avg-cpu' => {}, 'Device' => {} },
+    'res_save' => nil
   }
   begin
     time_start = Time.new
@@ -724,7 +904,7 @@ def get_iostat()
       fnd_dev, cptr_dev, item_dev = [ false, false, nil ]
       set_found = 0
       @raw_data[m_name] = []
-      IO.popen('iostat -x 1 2 2>&1', 'r').each_line { |l|
+      IO.popen('iostat -x 1 2 2>&1').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
         set_found += 1 if /^avg-cpu:/.match(l)
@@ -765,9 +945,12 @@ def get_iostat()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -787,11 +970,12 @@ end
 #        Family: System x
 #  ...
 # ------------------------------
-def get_dmidecode()
+def get_dmidecode( do_diff=true )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => {}
+    'res' => {},
+    'res_save' => nil
   }
   begin
     time_start = Time.new
@@ -803,7 +987,7 @@ def get_dmidecode()
       start_capture = false
       lines_gotten = 0
       @raw_data[m_name] = []
-      IO.popen('dmidecode 2>&1', 'r').each_line { |l|
+      IO.popen('dmidecode 2>&1').each_line { |l|
         @raw_data[m_name] << l
         break if lines_gotten > 10
         l.strip!
@@ -828,9 +1012,12 @@ def get_dmidecode()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -840,19 +1027,21 @@ end
 # Expected 'sysctl -a' output format:
 #   <key> = <value>
 # -----------------------------------
-def get_sysctl_a()
+def get_sysctl_a( do_diff=true )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => {}
+    'res' => {},
+    'res_save' => nil
   }
   begin
     time_start = Time.new
     m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
-      IO.popen('sysctl -a 2>&1', 'r').each_line { |l|
-        @raw_data[m_name] << l
+      IO.popen('sysctl -a 2>&1 | sort').each_line { |l|
+        @raw_data[m_name] << l \
+          if not @settings['SYSCTL_IGNORE'].include?(l.split('=')[0].strip)
         l.strip!
         if not l == '' and /=/.match(l)
           k, v = l.split('=').map { |i|
@@ -868,9 +1057,12 @@ def get_sysctl_a()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -917,7 +1109,7 @@ end
 #     + - is in the foreground process group
 
 # ------------------------------
-def get_processes()
+def get_processes( do_diff=false )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -927,7 +1119,8 @@ def get_processes()
       'command_count' => {},
       'pid'           => {},
       'ppid'          => {}
-    }
+    },
+    'res_save' => nil
   }
   begin
     time_start = Time.new
@@ -936,7 +1129,7 @@ def get_processes()
       p = 'ps axwww -o pid,ppid,user,rsz,vsz,stat,lstart,command'
       @raw_data[m_name] = []
       # Ignore first line ...
-      IO.popen("#{p} 2>&1", 'r').readlines.slice(1..-1).each { |l|
+      IO.popen("#{p} 2>&1").readlines.slice(1..-1).each { |l|
         @raw_data[m_name] << l
         i = l.strip.split(/\s+/)
         #
@@ -1007,9 +1200,12 @@ def get_processes()
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
   end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
   return rtn
 end
 
@@ -1095,6 +1291,7 @@ m5.settings.keys.each { |k|
   m5_k = "M5_#{k}"
   if ENV.has_key?(m5_k)
     m5.settings[k] = ENV[m5_k] if ENV[m5_k] != ''
+    m5.settings[k] = m5.settings[k].to_i if m5.settings_type_int.include?(k)
   end
 }
 
@@ -1140,7 +1337,11 @@ m5_out = {}
 threads = []
 m_list.each { |met|
   threads << Thread.new( met ) { |m|
-    m5_out[m] = eval("m5.#{m}")
+    m5_out[m] = if m5.settings['DO_DIFF']
+      eval("m5.#{m}(#{m5.settings['DO_DIFF']})")
+    else
+      eval("m5.#{m}")
+    end
   }
   while threads.find_all { |t|
     t.alive?
@@ -1149,15 +1350,6 @@ m_list.each { |met|
   end
 }
 threads.each { |t| t.join}
-
-#
-# Save raw data ...
-#
-m5.raw_data.keys.each { |k|
-  f = File.open( "#{m5.settings['WORKDIR']}/raw.#{k}", "w" )
-  m5.raw_data[k].each { |line| f.puts line }
-  f.close
-}
 
 #
 # Print out if needed ...
