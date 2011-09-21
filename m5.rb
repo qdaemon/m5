@@ -78,20 +78,23 @@ def initialize()
     'DO_DIFF'          => false,              # Default is not to do diff.
     'MAX_THREADS'      => 4,                  # Max number of threads.
     'SYSCTL_IGNORE'    => %r{
-      (
-        \berror\b
+        ^error
         | permission\ denied
-        | \.gc_timeout$
-        | fs.dentry-state
-        | fs.file-nr
-        | fs.inode-(nr|state)
-        | fs.quota.syncs
-        | kernel.pty.nr
-        | kernel.random.(boot_id|entropy_avail|uuid)
-        | net.ipv..conf.*.(accept_dad|disable_ipv.|flush)
-        | net.ipv..route.flush$
-      )
     }x,                                       # sysctl params to ignore.
+    #'SYSCTL_IGNORE'    => %r{
+      #(
+      #  | \.gc_timeout$
+      #  | fs.dentry-state
+      #  | fs.file-nr
+      #  | fs.inode-(nr|state)
+      #  | fs.quota.syncs
+      #  | kernel.pty.nr
+      #  | kernel.random.(boot_id|entropy_avail|uuid)
+      #  | net.ipv..conf.*.(accept_dad|disable_ipv.|flush)
+      #  | net.ipv..netfilter.ip_conntrack_count
+      #  | net.ipv..route.flush
+      #)
+    #}x,                                       # sysctl params to ignore.
     'WORKDIR'          => '/var/m5',          # All temp and persist data.
   }
 
@@ -1057,7 +1060,7 @@ def get_sysctl_a( do_diff=true )
     m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
-      IO.popen('sysctl -a 2>/dev/null | sort').each_line { |l|
+      IO.popen('sysctl -a 2>/dev/null | grep = | sort').each_line { |l|
         @raw_data[m_name] << l \
           if not @settings['SYSCTL_IGNORE'].match(l.split('=')[0].strip)
         l.strip!
@@ -1244,6 +1247,11 @@ $stderr.reopen $stdout # Sending STDERR to STDOUT ...
 $defout.sync = true    # Don't buffer I/O ...
 
 #
+# Set 3rdParty lib path ...
+#
+$:.unshift File.join(File.dirname(__FILE__), '.', '3rdParty/lib/ruby/1.8')
+
+#
 # Initializing ...
 #
 
@@ -1375,10 +1383,13 @@ threads.each { |t| t.join}
 
 if not cgi_print.empty?
   require 'yaml'
+  require 'json' # (3rdParty lib)
+  # Print based on choice ...
   print "Content-type: text/plain\n\n"
-  puts m5_out.inspect      if cgi_print.include?('inspect')
-  puts m5.raw_data.to_yaml if cgi_print.include?('raw')
-  puts m5_out.to_yaml      if cgi_print.include?('yaml')
+  puts m5_out.inspect        if cgi_print.include?('inspect')
+  puts m5.raw_data.to_yaml   if cgi_print.include?('raw')
+  puts m5_out.to_yaml        if cgi_print.include?('yaml')
+  puts JSON.generate(m5_out) if cgi_print.include?('json')
 end
 
 exit(0)
