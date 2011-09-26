@@ -67,6 +67,7 @@ def initialize()
   # that begins with "M5_<setting>" ...
   @settings = {
     'ACTION_TIMEOUT'   => 10,                 # Max time to run any action.
+    # cpuinfo params to ignore ...
     'CPUINFO_IGNORE'   => %r{
       (
         bogomips
@@ -77,24 +78,22 @@ def initialize()
     'ERRLOG'           => '/var/m5/err.log',  # Where errors are logged.
     'DO_DIFF'          => false,              # Default is not to do diff.
     'MAX_THREADS'      => 4,                  # Max number of threads.
+    # sysctl params to ignore ...
     'SYSCTL_IGNORE'    => %r{
-        ^error
-        | permission\ denied
+      (
+        ^error:
+        | fs.dentry-state
+        | fs.file-nr
+        | fs.inode-(nr|state)
+        | fs.quota.syncs
+        | kernel.pty.nr
+        | kernel.random.(boot_id|entropy_avail|uuid)
+        | \.netfilter.ip_conntrack_count
+        | \.random
+        | \.route.gc_timeout
+        | \.route.gc_interval
+      )
     }x,                                       # sysctl params to ignore.
-    #'SYSCTL_IGNORE'    => %r{
-      #(
-      #  | \.gc_timeout$
-      #  | fs.dentry-state
-      #  | fs.file-nr
-      #  | fs.inode-(nr|state)
-      #  | fs.quota.syncs
-      #  | kernel.pty.nr
-      #  | kernel.random.(boot_id|entropy_avail|uuid)
-      #  | net.ipv..conf.*.(accept_dad|disable_ipv.|flush)
-      #  | net.ipv..netfilter.ip_conntrack_count
-      #  | net.ipv..route.flush
-      #)
-    #}x,                                       # sysctl params to ignore.
     'WORKDIR'          => '/var/m5',          # All temp and persist data.
   }
 
