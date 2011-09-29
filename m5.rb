@@ -17,9 +17,6 @@
 # + For some reason "cat <file>" works better than "File.open <file>" when
 # dealing with "/proc" FS.
 #
-#
-# TODO:
-# + Add env dump
 
 class M5
 # ---------------------------------------------------------------------
@@ -58,6 +55,7 @@ def initialize()
 
   # List of methods that pulls systems stats ...
   @info_methods = %w(
+    get_env
     get_os_release
     get_uname
     get_uptime
@@ -318,6 +316,40 @@ end
 # Data gathering functions below here ...
 #
 # *********************************************************************
+
+# -----------------------------------
+# FUNCTION:  Get ENV info.
+# Return [ <ENV info> ]
+# -----------------------------------
+def get_env( do_diff=true )
+  rtn = {
+    'code' => eval(@moc),
+    'msg'  => nil,
+    'res'  => {},
+    'res_save' => nil
+  }
+  begin
+    time_start = Time.new
+    m_name = "#{__method__}" # This function's (method) name ...
+    timeout( @settings['ACTION_TIMEOUT'] ) do
+      @raw_data[m_name] = []
+      ENV.each { |k,v|
+        rtn['res'][k] = v
+        @raw_data[m_name] << "#{k}=#{v}"
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
+    rescue
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
+  end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
+  return rtn
+end
 
 # -----------------------------------
 # FUNCTION:  Get O/S release info.
