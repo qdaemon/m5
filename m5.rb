@@ -17,20 +17,31 @@
 # + For some reason "cat <file>" works better than "File.open <file>" when
 # dealing with "/proc" FS.
 #
+#
+# TODO:
+# + Allow overrides and loading of additional facts.
+# + Add env dump
 
 class M5
 # ---------------------------------------------------------------------
 
-attr_reader :pid, :init_time, :mec, :moc, :info_methods, :settings,
-            :settings_type_int, :raw_data, :charset, :time_fmt
-attr_writer :settings, :settings_type_int
+attr_reader :pid, :init_time, :mec, :moc, :info_methods, :facts,
+            :settings, :settings_type_int, :raw_data, :charset,
+            :time_fmt
+attr_writer :facts, :settings, :settings_type_int
 
 # -----------------------------------
 # FUNCTION:  Class initializer.
 # -----------------------------------
 def initialize()
 
+  require 'socket'
   require 'timeout'
+  require 'yaml'
+
+  # 3rdParty lib(s) ...
+  $:.unshift File.join(File.dirname(__FILE__), '.', '3rdParty/lib/ruby/1.8')
+  require 'json'
 
   # "This" process' PID ...
   @pid = $$
@@ -63,6 +74,11 @@ def initialize()
     get_processes
   )
 
+  # Facts.  Reserve for customized "anything" that anyone wants returned ...
+  @facts = {
+    'nodename' => Socket.gethostbyname(Socket.gethostname)[0],
+  }
+
   # Some reasonable settings.  Any may be override with ENV of the same name
   # that begins with "M5_<setting>" ...
   @settings = {
@@ -74,6 +90,7 @@ def initialize()
         | cpu\ MHz
       )
     }x,                                       # cpuinfo params to ignore.
+    'DATUM_DELIM'      => 'DATUM:',           # Delimiter for data print out.
     'DIFFLOG'          => '/var/m5/diff.log', # Where diffs are logged.
     'ERRLOG'           => '/var/m5/err.log',  # Where errors are logged.
     'DO_DIFF'          => false,              # Default is not to do diff.
@@ -245,6 +262,29 @@ def save_last_current( method_name, data, do_diff=@settings['DO_DIFF'] )
   end
   return rtn
 end
+
+# -----------------------------------
+# FUNCTION:  Print data given output type.
+# Return <true>
+# -----------------------------------
+def print_datum( data_out, data_raw, out_type )
+  begin
+    pre = @settings['DATUM_DELIM']
+    print "Content-type: text/plain\n\n"
+    puts "#{pre}:BEGIN:inspect", data_out.inspect, "#{pre}:END:inspect" \
+      if out_type.include?('inspect')
+    puts "#{pre}:BEGIN:json", JSON.generate(data_out), "#{pre}:END:json" \
+      if out_type.include?('json')
+    puts "#{pre}:BEGIN:raw", data_raw.to_yaml, "#{pre}:END:raw" \
+      if out_type.include?('raw')
+    puts "#{pre}:BEGIN:yaml", data_out.to_yaml, "#{pre}:END:yaml" \
+      if out_type.include?('yaml')
+    rescue
+      puts "#{eval(@mec)}:#{$!.to_s.strip}]"
+  end
+  return true
+end
+
 
 # *********************************************************************
 #
@@ -1246,11 +1286,6 @@ $stderr.reopen $stdout # Sending STDERR to STDOUT ...
 $defout.sync = true    # Don't buffer I/O ...
 
 #
-# Set 3rdParty lib path ...
-#
-$:.unshift File.join(File.dirname(__FILE__), '.', '3rdParty/lib/ruby/1.8')
-
-#
 # Initializing ...
 #
 
@@ -1258,7 +1293,7 @@ script = File.basename($0) # "This" script name ...
 m5 = M5.new # Main data object ...
 
 # List of valid methods ...
-m5_prop = %w( pid init_time settings )
+m5_prop = %w( pid init_time facts settings )
 m_valid = m5_prop + m5.info_methods
 
 #
@@ -1314,10 +1349,9 @@ end
 
 m5.settings.keys.each { |k|
   m5_k = "M5_#{k}"
-  if ENV.has_key?(m5_k)
-    m5.settings[k] = ENV[m5_k] if ENV[m5_k] != ''
-    m5.settings[k] = m5.settings[k].to_i if m5.settings_type_int.include?(k)
-  end
+  next if not ENV.has_key?(m5_k)
+  m5.settings[k] = ENV[m5_k] if ENV[m5_k] != ''
+  m5.settings[k] = m5.settings[k].to_i if m5.settings_type_int.include?(k)
 }
 
 #
@@ -1379,17 +1413,7 @@ threads.each { |t| t.join}
 #
 # Print out if needed ...
 #
-
-if not cgi_print.empty?
-  require 'yaml'
-  require 'json' # (3rdParty lib)
-  # Print based on choice ...
-  print "Content-type: text/plain\n\n"
-  puts m5_out.inspect        if cgi_print.include?('inspect')
-  puts m5.raw_data.to_yaml   if cgi_print.include?('raw')
-  puts m5_out.to_yaml        if cgi_print.include?('yaml')
-  puts JSON.generate(m5_out) if cgi_print.include?('json')
-end
+m5.print_datum( m5_out, m5.raw_data, cgi_print ) if not cgi_print.empty?
 
 exit(0)
 
