@@ -19,15 +19,13 @@
 #
 #
 # TODO:
-# + Allow overrides and loading of additional facts.
 # + Add env dump
 
 class M5
 # ---------------------------------------------------------------------
 
-attr_reader :pid, :init_time, :mec, :moc, :info_methods, :facts,
-            :settings, :settings_type_int, :raw_data, :charset,
-            :time_fmt
+attr_reader :pid, :node_name, :init_time, :mec, :moc, :info_methods, :facts,
+            :settings, :settings_type_int, :raw_data, :charset, :time_fmt
 attr_writer :facts, :settings, :settings_type_int
 
 # -----------------------------------
@@ -45,6 +43,9 @@ def initialize()
 
   # "This" process' PID ...
   @pid = $$
+
+  # "This" node name ...
+  @node_name = Socket.gethostbyname(Socket.gethostname)[0]
 
   # "This" object's instantiation time ...
   @init_time = Time.new
@@ -75,12 +76,26 @@ def initialize()
   )
 
   # Facts.  Reserve for customized "anything" that anyone wants returned ...
-  @facts = {
-    'nodename' => Socket.gethostbyname(Socket.gethostname)[0],
-  }
+  # Default config file for facts is /etc/m5/facts.conf.  Location can be set
+  # with enviroment variable M5_FACTS ...
+  @facts = {}
+  facts_conf = '/etc/m5/facts.conf'
+  if ENV.has_key?('M5_FACTS')
+    facts_conf = ENV['M5_FACTS'] if ENV['M5_FACTS'].strip != ''
+  end
+  facts_re = Regexp.compile('^FACT:(.*):(.*)$')
+  File.open(facts_conf, 'r').each_line { |l|
+    m = facts_re.match(l.strip)
+    next if m.nil?
+    k, v = [ m[1].strip, m[2].strip ]
+    next if k.nil? or k == ''
+    @facts[k.gsub('COLON',':')] = v.gsub('COLON',':')
+  } if FileTest.readable?(facts_conf)
 
   # Some reasonable settings.  Any may be override with ENV of the same name
-  # that begins with "M5_<setting>" ...
+  # that begins with "M5_<setting>".  Default config file (for override) is
+  # /etc/m5/settings.conf.  Location can be set with environment variable
+  # M5_SETTINGS ...
   @settings = {
     'ACTION_TIMEOUT'   => 10,                 # Max time to run any action.
     # cpuinfo params to ignore ...
@@ -113,6 +128,18 @@ def initialize()
     }x,                                       # sysctl params to ignore.
     'WORKDIR'          => '/var/m5',          # All temp and persist data.
   }
+  settings_conf = '/etc/m5/settings.conf'
+  if ENV.has_key?('M5_SETTINGS')
+    settings_conf = ENV['M5_SETTINGS'] if ENV['M5_SETTINGS'].strip != ''
+  end
+  settings_re = Regexp.compile('^SETTING:(.*):(.*)$')
+  File.open(settings_conf, 'r').each_line { |l|
+    m = settings_re.match(l.strip)
+    next if m.nil?
+    k, v = [ m[1].strip, m[2].strip ]
+    next if k.nil? or k == ''
+    @settings[k.gsub('COLON',':')] = v.gsub('COLON',':')
+  } if FileTest.readable?(settings_conf)
 
   # Setting types is used in converting ENV overrides to proper type ...
   @settings_type_int = %w(
@@ -1293,7 +1320,7 @@ script = File.basename($0) # "This" script name ...
 m5 = M5.new # Main data object ...
 
 # List of valid methods ...
-m5_prop = %w( pid init_time facts settings )
+m5_prop = %w( pid node_name init_time facts settings )
 m_valid = m5_prop + m5.info_methods
 
 #
