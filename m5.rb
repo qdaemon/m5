@@ -7,6 +7,8 @@
 #
 # + Requires ruby version >= 1.8.7
 #   - Using __method__ in functions to retrieve name of "this" function.
+#   - Not tested against version 1.9.x.
+#   - Requires JSON ruby module.
 #
 # + Yes, "eval" is used ...
 #
@@ -16,6 +18,26 @@
 #
 # + For some reason "cat <file>" works better than "File.open <file>" when
 # dealing with "/proc" FS.
+#
+# + Utilities used:
+#   cat
+#   diff
+#   dmidecode
+#   iostat -x 1 2
+#   ip address show
+#   netstat -i
+#   netstat -pant
+#   netstat -rn
+#   ps axwww -o pid,ppid,user,rsz,vsz,stat,lstart,command
+#   sysctl -a
+#   uname -snrmv
+#
+# + /proc FS used:
+#   cpuinfo
+#   loadavg
+#   meminfo
+#   uptime
+#   vmstat
 #
 
 class M5
@@ -541,7 +563,7 @@ def get_cpuinfo( do_diff=true )
     m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
-      File.open('/proc/cpuinfo', 'r').each_line { |l|
+      IO.popen('cat /proc/cpuinfo 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l \
           if not @settings['CPUINFO_IGNORE'].match(l.split(':')[0].strip)
         l.strip!
@@ -652,7 +674,7 @@ def get_vmstat( do_diff=false )
     m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
-      File.open('/proc/vmstat', 'r').each_line { |l|
+      IO.popen('cat /proc/vmstat 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
         if not l == ''
