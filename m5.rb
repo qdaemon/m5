@@ -8,7 +8,7 @@
 # + Requires ruby version >= 1.8.7
 #   - Using __method__ in functions to retrieve name of "this" function.
 #   - Not tested against version 1.9.x.
-#   - Requires JSON ruby module.
+#   - Requires JSON module (http://www.ping.de/~flori/json_pure-1.5.3.tgz).
 #
 # + Yes, "eval" is used ...
 #
@@ -19,7 +19,7 @@
 # + For some reason "cat <file>" works better than "File.open <file>" when
 # dealing with "/proc" FS.
 #
-# + Utilities used:
+# + Dependent utilities:
 #   cat
 #   diff
 #   dmidecode
@@ -32,7 +32,7 @@
 #   sysctl -a
 #   uname -snrmv
 #
-# + /proc FS used:
+# + Dependent /proc FS:
 #   cpuinfo
 #   loadavg
 #   meminfo
