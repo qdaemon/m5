@@ -39,6 +39,9 @@
 #   uptime
 #   vmstat
 #
+# TODO:
+# + mcron
+#
 
 class M5
 # ---------------------------------------------------------------------
@@ -50,7 +53,10 @@ attr_writer :facts, :settings, :settings_type_int
 # -----------------------------------
 # FUNCTION:  Class initializer.
 # -----------------------------------
-def initialize()
+def initialize( debug_level=0 )
+
+  m_dbg = "method[#{__method__}]"
+  puts "DEBUG3::#{m_dbg}" if debug_level >= 3
 
   require 'socket'
   require 'timeout'
@@ -103,14 +109,24 @@ def initialize()
   if ENV.has_key?('M5_FACTS')
     facts_conf = ENV['M5_FACTS'] if ENV['M5_FACTS'].strip != ''
   end
+  puts "DEBUG4::#{m_dbg},Facts file[#{facts_conf}]" if debug_level >= 4
   facts_re = Regexp.compile('^FACT:(.*):(.*)$')
   File.open(facts_conf, 'r').each_line { |l|
     m = facts_re.match(l.strip)
     next if m.nil?
     k, v = [ m[1].strip, m[2].strip ]
     next if k.nil? or k == ''
-    @facts[k.gsub('COLON',':')] = v.gsub('COLON',':')
+    f, fv = [ k.gsub('COLON',':'), v.gsub('COLON',':') ]
+    @facts[f] = fv
+    puts "DEBUG5::#{m_dbg},Fact[#{f}=#{fv}]" if debug_level >= 5
   } if FileTest.readable?(facts_conf)
+
+  # Setting types is used in converting ENV overrides to proper type ...
+  @settings_type_int = %w(
+    ACTION_TIMEOUT
+    DEBUG
+    MAX_THREADS
+  )
 
   # Some reasonable settings.  Any may be override with ENV of the same name
   # that begins with "M5_<setting>".  Default config file (for override) is
@@ -126,6 +142,7 @@ def initialize()
       )
     }x,                                       # cpuinfo params to ignore.
     'DATUM_DELIM'      => 'DATUM:',           # Delimiter for data print out.
+    'DEBUG'            => debug_level,        # Higher number = more verbose.
     'DIFFLOG'          => '/var/m5/diff.log', # Where diffs are logged.
     'ERRLOG'           => '/var/m5/err.log',  # Where errors are logged.
     'DO_DIFF'          => false,              # Default is not to do diff.
@@ -152,20 +169,18 @@ def initialize()
   if ENV.has_key?('M5_SETTINGS')
     settings_conf = ENV['M5_SETTINGS'] if ENV['M5_SETTINGS'].strip != ''
   end
+  puts "DEBUG4::#{m_dbg},Settings file[#{settings_conf}]" if debug_level >= 4
   settings_re = Regexp.compile('^SETTING:(.*):(.*)$')
   File.open(settings_conf, 'r').each_line { |l|
     m = settings_re.match(l.strip)
     next if m.nil?
     k, v = [ m[1].strip, m[2].strip ]
     next if k.nil? or k == ''
-    @settings[k.gsub('COLON',':')] = v.gsub('COLON',':')
+    s, sv = [ k.gsub('COLON',':'), v.gsub('COLON',':') ]
+    sv = sv.to_i if @settings_type_int.include?(s)
+    @settings[s] = sv
+    puts "DEBUG5::#{m_dbg},Setting[#{s}=#{sv}]" if debug_level >= 5
   } if FileTest.readable?(settings_conf)
-
-  # Setting types is used in converting ENV overrides to proper type ...
-  @settings_type_int = %w(
-    ACTION_TIMEOUT
-    MAX_THREADS
-  )
 
   # Raw data ...
   @raw_data = {}
@@ -179,8 +194,19 @@ def initialize()
 
 end
 
+# -----------------------------------
+# FUNCTION:  Print out in standard debug format.
+# -----------------------------------
+def print_debug( min_level, method, message=nil )
+  if @settings['DEBUG'] >= min_level
+    msg = "DEBUG#{min_level}::method[#{method}]"
+    msg = "#{msg},#{message}" if not ( message.nil? or message.strip == '' )
+    puts msg
+  end
+end
+
 ## -----------------------------------
-## FUNCTION:  Print out our standard time format.
+## FUNCTION:  Print out standard time format.
 ## Standard time format: %F.%T.<millisec>%z
 ##   F = %Y-%m-%d (the ISO 8601 date format)
 ##   T = 24-hour (%H:%M:%S)
@@ -193,6 +219,8 @@ end
 #    + dtg.strftime("%z")
 #end
 def time_now
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   return Time.new.strftime(@time_fmt)
 end
 
@@ -200,13 +228,18 @@ end
 # FUNCTION:  Log errors ...
 # -----------------------------------
 def log_error( tag, data, log_file=@settings['ERRLOG'] )
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
-    m_name = "#{__method__}" # This function's (method) name ...
     tag = "#{tag}-#{(0..8).map{ charset.to_a[rand(charset.size)] }.join}"
     log = File.open(log_file, 'a+')
-    data.each { |l| log.puts "#{time_now}::#{tag}::#{l}" }
+    data.each { |l|
+      e_msg = "#{time_now}::#{tag}::#{l}"
+      log.puts e_msg
+      print_debug( 6, "#{m_name}", e_msg )
+    }
     rescue
-      puts "FATA/#{m_name}::#{tag}::#{$!.to_s.strip}"
+      puts "FATAL/#{m_name}::#{tag}::#{$!.to_s.strip}"
       exit(1)
   end
 end
@@ -216,8 +249,9 @@ end
 # Return <change in time from current> in ms as %0.3f string format.
 # -----------------------------------
 def time_since( dtg )
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   return begin
-    m_name = "#{__method__}" # This function's (method) name ...
     sprintf("%0.6f microsec", Time.new - dtg)
     rescue
       # Log but ignore ...
@@ -234,8 +268,9 @@ end
 # -----------------------------------
 def map_k_to_v( list_k, list_v )
   rtn = {}
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
-    m_name = "#{__method__}" # This function's (method) name ...
     if list_k.length == list_v.length
       count = 0 ; list_k.each { |k| rtn[k] = list_v[count] ; count += 1 }
     else
@@ -254,13 +289,15 @@ end
 # -----------------------------------
 def file_diff( tag, file_new, file_old )
   rtn = []
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
-    m_name = "#{__method__}" # This function's (method) name ...
     tag = "#{tag}-#{(0..8).map{ charset.to_a[rand(charset.size)] }.join}"
     IO.popen("diff #{file_new} #{file_old} 2>/dev/null").each_line { |l|
       rtn << l.strip
     }
     if not rtn.empty? # Write out diffs if any ...
+      print_debug( 6, "#{m_name}", "Diff found [#{tag}]" )
       diff_log = File.open( @settings['DIFFLOG'], 'a+' )
       rtn.each { |l| diff_log.puts "#{time_now}::#{tag}::#{l}" }
       diff_log.close
@@ -291,8 +328,9 @@ def save_last_current( method_name, data, do_diff=@settings['DO_DIFF'] )
       'diff'     => nil
     }
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
-    m_name = "#{__method__}" # This function's (method) name ...
     # Save current to last ...
     system( "cat #{rtn['res']['current']} > #{rtn['res']['last']} 2>/dev/null" )
     # Save data to current ...
@@ -315,6 +353,8 @@ end
 # Return <true>
 # -----------------------------------
 def print_datum( data_out, data_raw, out_type )
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     pre = @settings['DATUM_DELIM']
     print "Content-type: text/plain\n\n"
@@ -350,14 +390,16 @@ def get_env( do_diff=true )
     'res'  => {},
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       ENV.each { |k,v|
         rtn['res'][k] = v
         @raw_data[m_name] << "#{k}=#{v}"
+        print_debug( 6, "#{m_name}", "ENV[#{k}=#{v}]" )
       }
     end
     rtn['msg'] = time_since( time_start )
@@ -384,9 +426,10 @@ def get_os_release( do_diff=true )
     'res'  => [],
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       # Supported (in order below):  Redhat, SuSE, Ubuntu ...
       %w(
@@ -395,10 +438,12 @@ def get_os_release( do_diff=true )
         /etc/lsb-release
       ).each { |f|
         if FileTest.exist?(f)
+          print_debug( 5, "#{m_name}", "File[#{f}]" )
           @raw_data[m_name] = []
           rtn['res'] = File.open(f, 'r').readlines.map { |l|
             @raw_data[m_name] << l
             l.strip! ; ( l == '' ? nil : l )
+            print_debug( 6, "#{m_name}", "Line[#{l}]" )
           }.compact
           break
         end
@@ -431,14 +476,16 @@ def get_uname( do_diff=true )
     'res' => [],
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       rtn['res'] = IO.popen('uname -snrvm 2>&1').readlines.map { |l|
         @raw_data[m_name] << l
         l.strip! ; ( l == '' ? nil : l )
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
       }.compact
     end
     rtn['msg'] = time_since( time_start )
@@ -469,15 +516,18 @@ def get_uptime( do_diff=false )
     'res' => {'uptime' => nil, 'idle' => nil},
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/uptime 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if /^[0-9]+/.match(l)
+          print_debug( 6, "#{m_name}", "Line matched!" )
           upt, idl = l.split(/\s+/)
           rtn['res']['uptime'] = upt.to_i
           rtn['res']['idle'] = idl.to_i
@@ -519,15 +569,18 @@ def get_loadavg( do_diff=false )
     'res' => {'m1' => nil, 'm5' => nil, 'm15' => nil},
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/loadavg 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if /^[0-9]+/.match(l)
+          print_debug( 6, "#{m_name}", "Line matched!" )
           rtn['res']['m1'], rtn['res']['m5'], rtn['res']['m15'],
             dont_care, dont_care = l.split(/\s+/)
           break
@@ -558,15 +611,17 @@ def get_cpuinfo( do_diff=true )
     'res' => {},
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/cpuinfo 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l \
           if not @settings['CPUINFO_IGNORE'].match(l.split(':')[0].strip)
         l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if not l == ''
           k, v = l.split(':').map { |i|
             ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
@@ -611,14 +666,16 @@ def get_meminfo( do_diff=false )
     'res' => {},
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/meminfo 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if not l == ''
           k, v = l.split(':').map { |i|
             ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
@@ -637,6 +694,7 @@ def get_meminfo( do_diff=false )
           rtn['res']["Cached"].split(/\s+/)[0].to_i + \
           rtn['res']["MemFree"].split(/\s+/)[0].to_i
         ).to_s + " kB"
+        print_debug(6,"#{m_name}","TrueMemFree[#{rtn['res']['TrueMemFree']}]" )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
@@ -669,14 +727,16 @@ def get_vmstat( do_diff=false )
     'res' => {},
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/vmstat 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if not l == ''
           k, v = l.split(/\s+/).map { |i|
             ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
@@ -713,15 +773,18 @@ def get_ip_bindings( do_diff=true )
     'res' => {},
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       IO.popen('ip address show 2>&1').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if /\binet\b/.match(l)
+          print_debug( 6, "#{m_name}", "Line matched!" )
           l_arr = l.split(/\s+/)
           ip_nic = l_arr[-1]
           ip_addr = l_arr[1]
@@ -783,9 +846,10 @@ def get_netstat_i( do_diff=false )
     'res' => {},
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       # Cycle until find '^Iface:', then start capture on next line.
       # Continue until first blank line ...
@@ -795,15 +859,18 @@ def get_netstat_i( do_diff=false )
       IO.popen('netstat -i 2>&1').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if not l == ''
           if /^Iface\b/.match(l)
             start_cptr = true
             item_iface = l.split(/\s+/).slice(1..-1) # Iface keys list ...
+            print_debug( 6, "#{m_name}", "Iface keys[#{item_iface.inspect}]" )
           elsif start_cptr
             next if /no stat/i.match(l)
             la = l.split(/\s+/)
             # Matching Iface values to Iface keys list found earlier ...
             rtn['res'][la[0]] = map_k_to_v(item_iface, la.slice(1..-1))
+            print_debug(6,"#{m_name}","Iface[#{rtn['res'][la[0]].inspect}]")
           end
         elsif start_cptr # l == '' at this point ...
           break
@@ -861,16 +928,19 @@ def get_netstat_pant( do_diff=false )
     'res' => {},
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       # Doing count for everyone else but LISTEN ...
       IO.popen('netstat -pant 2>&1').each_line { |l|
         @raw_data[m_name] << l
+        l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if /^tcp\s+.*$/.match(l)
-          line = l.strip.split(/\s+/)
+          line = l.split(/\s+/)
           state = line[5]
           if not rtn['res'].has_key?(state)
             # Initialize new state if not yet seen ...
@@ -943,9 +1013,10 @@ def get_netstat_rn( do_diff=true )
     'res' => {},
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       # Cycle until find '^Iface:', then start capture on next line.  Continue
       # until first blank line ...
@@ -955,6 +1026,7 @@ def get_netstat_rn( do_diff=true )
       IO.popen('netstat -rn 2>&1').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if not l == ''
           if /^Destination\b/.match(l)
             start_cptr = true
@@ -1035,9 +1107,10 @@ def get_iostat( do_diff=false )
     'res' => { 'avg-cpu' => {}, 'Device' => {} },
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       # Cycle until find '^avg-cpu:', then capture.  Then look for '^Device:',
       # then capture ...
@@ -1048,6 +1121,7 @@ def get_iostat( do_diff=false )
       IO.popen('iostat -x 1 2 2>&1').each_line { |l|
         @raw_data[m_name] << l
         l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
         set_found += 1 if /^avg-cpu:/.match(l)
         if set_found == 2 # Only work on second set!
           if not fnd_cpu and /^avg-cpu:/.match(l)
@@ -1118,9 +1192,10 @@ def get_dmidecode( do_diff=true )
     'res' => {},
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       # Cycle until find System Information, then capture.  Stop after seeing
       # '^Handle' or after 10 lines ...
@@ -1132,9 +1207,11 @@ def get_dmidecode( do_diff=true )
         @raw_data[m_name] << l
         break if lines_gotten > 10
         l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if /^System Information/.match(l)
             found = true
             start_capture = true
+            print_debug( 6, "#{m_name}", "Start capture" )
             next
         elsif /^Handle /.match(l)
             break if found and start_capture
@@ -1175,15 +1252,17 @@ def get_sysctl_a( do_diff=true )
     'res' => {},
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       IO.popen('sysctl -a 2>/dev/null | grep = | sort').each_line { |l|
         @raw_data[m_name] << l \
           if not @settings['SYSCTL_IGNORE'].match(l.split('=')[0].strip)
         l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if not l == '' and /=/.match(l)
           k, v = l.split('=').map { |i|
             ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
@@ -1263,16 +1342,19 @@ def get_processes( do_diff=false )
     },
     'res_save' => nil
   }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    m_name = "#{__method__}" # This function's (method) name ...
     timeout( @settings['ACTION_TIMEOUT'] ) do
       p = 'ps axwww -o pid,ppid,user,rsz,vsz,stat,lstart,command'
       @raw_data[m_name] = []
       # Ignore first line ...
       IO.popen("#{p} 2>&1").readlines.slice(1..-1).each { |l|
         @raw_data[m_name] << l
-        i = l.strip.split(/\s+/)
+        l.strip!
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        i = l.split(/\s+/)
         #
         # Filter out 'this' process and its children ...
         #
@@ -1334,6 +1416,8 @@ def get_processes( do_diff=false )
           rtn['res']['ppid'][i_pid] = [] \
             if not rtn['res']['ppid'].has_key?(i_pid)
           rtn['res']['ppid'][i_ppid] << i_pid
+        else
+          print_debug( 6, "#{m_name}", "Ignoring[#{i.inspect}]" )
         end
       }
     end
@@ -1367,17 +1451,6 @@ $stderr.reopen $stdout # Sending STDERR to STDOUT ...
 $defout.sync = true    # Don't buffer I/O ...
 
 #
-# Initializing ...
-#
-
-script = File.basename($0) # "This" script name ...
-m5 = M5.new # Main data object ...
-
-# List of valid methods ...
-m5_prop = %w( pid node_name init_time facts settings )
-m_valid = m5_prop + m5.info_methods
-
-#
 # Get CGI options ...
 #
 
@@ -1387,9 +1460,33 @@ cgi = CGI.new()
 # Get CGI options:
 #   - Lists are comma delimited.
 #   - methods - list of valid info_methods.
+#   - print - list of valid print methods.
+#   - debug - integer value 0 or higher.  Higher is more verbose.  Default 0.
 #
 cgi_methods = cgi.has_key?('methods') ? cgi['methods'].split(',') : []
 cgi_print = cgi.has_key?('print') ? cgi['print'].split(',') : []
+cgi_debug = cgi.has_key?('debug') ? cgi['debug'].to_i : 0
+
+# Look for environment override of DBG ...
+cgi_debug = ENV['M5_DBG'].to_i if ENV.has_key?('M5_DBG')
+
+#
+# Initializing ...
+#
+
+script = File.basename($0) # "This" script name ...
+m5 = M5.new(cgi_debug) # Main data object ...
+
+m5.print_debug( 5, "MAIN", "cgi_methods[#{cgi_methods}]" )
+m5.print_debug( 5, "MAIN", "cgi_print[#{cgi_print}]" )
+m5.print_debug( 5, "MAIN", "cgi_debug[#{cgi_debug}]" )
+
+# List of valid methods ...
+m5_prop = %w( pid node_name init_time facts settings )
+m_valid = m5_prop + m5.info_methods
+
+m5.print_debug( 5, "MAIN", "m5_prop[#{m5_prop.inspect}]" )
+m5.print_debug( 5, "MAIN", "Valid methods[#{m_valid.inspect}]" )
 
 #
 # Print help/usage as needed ...
@@ -1400,7 +1497,10 @@ if cgi_methods.include?('help') or cgi_methods.include?('usage')
 
 USAGE:
 
-  #{script} methods=<method(s) - comma delimit> print=<inspect,raw,yaml>
+  #{script} methods=<methods> [print=<inspect,jason,raw,yaml>] [debug=<num>]
+
+    ; <methods> - Comma delimited list of methods.
+    ; <debug> - Integer.  Higher number = more verbose.  Default 0.
 
 Valid methods ...
 
@@ -1433,6 +1533,7 @@ m5.settings.keys.each { |k|
   next if not ENV.has_key?(m5_k)
   m5.settings[k] = ENV[m5_k] if ENV[m5_k] != ''
   m5.settings[k] = m5.settings[k].to_i if m5.settings_type_int.include?(k)
+  m5.print_debug( 5, "MAIN", "Override found for #{m5_k}[#{ENV[m5_k]}]" )
 }
 
 #
@@ -1468,6 +1569,7 @@ m_list = cgi_methods.map { |m|
 }.compact
 # Default to all if empty list or "all" ...
 m_list = m_valid if ( m_list.empty? or m_list.include?("all") )
+m5.print_debug( 4, "MAIN", "Methods to exec[#{m_list.inspect}]" )
 
 #
 # Exec methods ...
