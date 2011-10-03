@@ -8,7 +8,12 @@
 # + /etc/m5/facts.conf - User customizations.  Anything users want to add to
 #   what M5 returns.  Default location can be set with env variable M5_FACTS.
 #
-# + /etc/m5/settings.conf - App customizations.
+# + /etc/m5/settings.conf - App customizations.  Overrides of supported/default
+#   M5 parameters.  Default location can be set with env variable M5_SETTINGS.
+#
+# + /etc/m5/regex_ignore.rb - App customizations.  Overrides of regex for
+#   specific methods to ignore data lines.  Default location can be set with
+#   env variable M5_REGEX_IGNORE.
 #
 # *** General notes:
 #
@@ -213,7 +218,9 @@ def initialize( debug_level=0 )
     if debug_level >= 4
   if FileTest.readable?(regex_ignore_conf)
     load regex_ignore_conf
-    @regex_ignore = $regex_ignore
+    @regex_ignore.keys.each { |k|
+      @regex_ignore[k] = $regex_ignore[k] if $regex_ignore.has_key?(k)
+    }
   end
 
   # Raw data ...
