@@ -3,7 +3,14 @@
 # Intelligent monitoring
 #   - Must run as "root".
 #
-# General note(s):
+# *** Configuration files:
+#
+# + /etc/m5/facts.conf - User customizations.  Anything users want to add to
+#   what M5 returns.  Default location can be set with env variable M5_FACTS.
+#
+# + /etc/m5/settings.conf - App customizations.
+#
+# *** General notes:
 #
 # + Requires ruby version >= 1.8.7
 #   - Using __method__ in functions to retrieve name of "this" function.
@@ -46,9 +53,10 @@
 class M5
 # ---------------------------------------------------------------------
 
-attr_reader :pid, :node_name, :init_time, :mec, :moc, :info_methods, :facts,
-            :settings, :settings_type_int, :raw_data, :charset, :time_fmt
-attr_writer :facts, :settings, :settings_type_int
+attr_reader :pid, :node_name, :init_time, :info_methods, :facts,
+            :settings, :settings_type_int, :raw_data, :charset, :time_fmt,
+            :regex_ignore, :moc, :mwc, :mec, :mfc
+attr_writer :facts, :settings, :settings_type_int, :regex_ignore
 
 # -----------------------------------
 # FUNCTION:  Class initializer.
@@ -75,11 +83,11 @@ def initialize( debug_level=0 )
   # "This" object's instantiation time ...
   @init_time = Time.new
 
-  # Method Error Code.  To be eval'ed in functions ...
-  @mec = '"ERROR/#{__method__}"'
-
-  # Method OK Code.  To be eval'ed in functions ...
+  # Method return codes.  To be eval'ed in functions ...
   @moc = '"OK/#{__method__}"'
+  @mwc = '"WARNING/#{__method__}"'
+  @mec = '"ERROR/#{__method__}"'
+  @mfc = '"FATAL/#{__method__}"'
 
   # List of methods that pulls systems stats ...
   @info_methods = %w(
@@ -134,35 +142,12 @@ def initialize( debug_level=0 )
   # M5_SETTINGS ...
   @settings = {
     'ACTION_TIMEOUT'   => 10,                 # Max time to run any action.
-    # cpuinfo params to ignore ...
-    'CPUINFO_IGNORE'   => %r{
-      (
-        bogomips
-        | cpu\ MHz
-      )
-    }x,                                       # cpuinfo params to ignore.
     'DATUM_DELIM'      => 'DATUM:',           # Delimiter for data print out.
     'DEBUG'            => debug_level,        # Higher number = more verbose.
     'DIFFLOG'          => '/var/m5/diff.log', # Where diffs are logged.
     'ERRLOG'           => '/var/m5/err.log',  # Where errors are logged.
     'DO_DIFF'          => false,              # Default is not to do diff.
     'MAX_THREADS'      => 4,                  # Max number of threads.
-    # sysctl params to ignore ...
-    'SYSCTL_IGNORE'    => %r{
-      (
-        ^error:
-        | fs.dentry-state
-        | fs.file-nr
-        | fs.inode-(nr|state)
-        | fs.quota.syncs
-        | kernel.pty.nr
-        | kernel.random.(boot_id|entropy_avail|uuid)
-        | \.netfilter.ip_conntrack_count
-        | \.random
-        | \.route.gc_timeout
-        | \.route.gc_interval
-      )
-    }x,                                       # sysctl params to ignore.
     'WORKDIR'          => '/var/m5',          # All temp and persist data.
   }
   settings_conf = '/etc/m5/settings.conf'
@@ -181,6 +166,55 @@ def initialize( debug_level=0 )
     @settings[s] = sv
     puts "DEBUG5::#{m_dbg},Setting[#{s}=#{sv}]" if debug_level >= 5
   } if FileTest.readable?(settings_conf)
+
+  # Regular expressions used in ignoring certain data retreived by methods.
+  # Some reasonable settings.  Any may be override with ENV of the same name
+  # that begins with "M5_<regex_ignore>".  Default config file (for override)
+  # is /etc/m5/regex_ignore.yml.  Location can be set with environment
+  # variable M5_REGEX_IGNORE ...
+  @regex_ignore = {
+    'cpuinfo' => %r{
+      (
+          bogomips
+        | cpu\ MHz
+      )
+    }x,
+    'env' => %r{
+      (
+          ^_$
+        | DISPLAY
+        | OLDPWD
+        | XAUTHORITY
+        | XDG_SESSION_COOKIE
+      )
+    }x,
+    'sysctl_a' => %r{
+      (
+          ^error:
+        | fs.dentry-state
+        | fs.file-nr
+        | fs.inode-(nr|state)
+        | fs.quota.syncs
+        | kernel.pty.nr
+        | kernel.random.(boot_id|entropy_avail|uuid)
+        | \.netfilter.ip_conntrack_count
+        | \.random
+        | \.route.gc_timeout
+        | \.route.gc_interval
+      )
+    }x,
+  }
+  regex_ignore_conf = '/etc/m5/regex_ignore.rb'
+  if ENV.has_key?('M5_REGEX_IGNORE')
+    regex_ignore_conf = ENV['M5_REGEX_IGNORE'] \
+      if ENV['M5_REGEX_IGNORE'].strip != ''
+  end
+  puts "DEBUG4::#{m_dbg},Regex Ignore file[#{regex_ignore_conf}]" \
+    if debug_level >= 4
+  if FileTest.readable?(regex_ignore_conf)
+    load regex_ignore_conf
+    @regex_ignore = $regex_ignore
+  end
 
   # Raw data ...
   @raw_data = {}
@@ -331,16 +365,22 @@ def save_last_current( method_name, data, do_diff=@settings['DO_DIFF'] )
   m_name = "#{__method__}" # This function's (method) name ...
   print_debug( 3, "#{m_name}" )
   begin
-    # Save current to last ...
-    system( "cat #{rtn['res']['current']} > #{rtn['res']['last']} 2>/dev/null" )
-    # Save data to current ...
-    f = File.open( rtn['res']['current'], "w+" )
-    data.each { |line| f.puts line }
-    f.close
-    # Run diff if required ...
-    rtn['res']['diff'] = \
-      file_diff(method_name, rtn['res']['current'], rtn['res']['last']) \
-      if do_diff
+    # Only save if there is something to save ...
+    if data.length > 0
+      # Save current to last ...
+      system( "cat #{rtn['res']['current']} > #{rtn['res']['last']} 2>/dev/null" )
+      # Save data to current ...
+      f = File.open( rtn['res']['current'], "w+" )
+      data.each { |line| f.puts line }
+      f.close
+      # Run diff if required ...
+      rtn['res']['diff'] = \
+        file_diff(method_name, rtn['res']['current'], rtn['res']['last']) \
+        if do_diff
+    else
+      rtn['code'], rtn['msg'] = [eval(@mwc), 'data argument empty']
+      log_error( m_name, [rtn['msg']] )
+    end
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
       log_error( m_name, [rtn['msg']] )
@@ -397,6 +437,7 @@ def get_env( do_diff=true )
     timeout( @settings['ACTION_TIMEOUT'] ) do
       @raw_data[m_name] = []
       ENV.each { |k,v|
+        next if @regex_ignore['env'].match(k)
         rtn['res'][k] = v
         @raw_data[m_name] << "#{k}=#{v}"
         print_debug( 6, "#{m_name}", "ENV[#{k}=#{v}]" )
@@ -619,7 +660,7 @@ def get_cpuinfo( do_diff=true )
       @raw_data[m_name] = []
       IO.popen('cat /proc/cpuinfo 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l \
-          if not @settings['CPUINFO_IGNORE'].match(l.split(':')[0].strip)
+          if not @regex_ignore['cpuinfo'].match(l.split(':')[0].strip)
         l.strip!
         print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if not l == ''
@@ -1260,7 +1301,7 @@ def get_sysctl_a( do_diff=true )
       @raw_data[m_name] = []
       IO.popen('sysctl -a 2>/dev/null | grep = | sort').each_line { |l|
         @raw_data[m_name] << l \
-          if not @settings['SYSCTL_IGNORE'].match(l.split('=')[0].strip)
+          if not @regex_ignore['sysct_a'].match(l.split('=')[0].strip)
         l.strip!
         print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if not l == '' and /=/.match(l)
