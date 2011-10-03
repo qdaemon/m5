@@ -219,7 +219,7 @@ def initialize( debug_level=0 )
   if FileTest.readable?(regex_ignore_conf)
     load regex_ignore_conf
     @regex_ignore.keys.each { |k|
-      @regex_ignore[k] = $regex_ignore[k] if $regex_ignore.has_key?(k)
+      @regex_ignore[k] = $regex_ignore[k].clone if $regex_ignore.has_key?(k)
     }
   end
 
