@@ -380,10 +380,10 @@ def save_last_current( method_name, data, do_diff=@settings['DO_DIFF'] )
       f = File.open( rtn['res']['current'], "w+" )
       data.each { |line| f.puts line }
       f.close
-      # Run diff if required ...
+      # Run diff if required; i.e., diff set true and last file not empty ...
       rtn['res']['diff'] = \
         file_diff(method_name, rtn['res']['current'], rtn['res']['last']) \
-        if do_diff
+        if do_diff and File.size(rtn['res']['last']) > 0
     else
       rtn['code'], rtn['msg'] = [eval(@mwc), 'data argument empty']
       log_error( m_name, [rtn['msg']] )
@@ -1308,7 +1308,7 @@ def get_sysctl_a( do_diff=true )
       @raw_data[m_name] = []
       IO.popen('sysctl -a 2>/dev/null | grep = | sort').each_line { |l|
         @raw_data[m_name] << l \
-          if not @regex_ignore['sysct_a'].match(l.split('=')[0].strip)
+          if not @regex_ignore['sysctl_a'].match(l.split('=')[0].strip)
         l.strip!
         print_debug( 6, "#{m_name}", "Line[#{l}]" )
         if not l == '' and /=/.match(l)
