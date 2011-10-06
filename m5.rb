@@ -53,7 +53,19 @@
 #
 # TODO:
 # + mcron
+# + file change detection
 #
+
+# -----------------------------------
+# FUNCTION:  Print out in standard debug format.
+# -----------------------------------
+def dbg_print( dbg_lv, min_lv, method, message=nil )
+  if dbg_lv >= min_lv
+    msg = "DEBUG#{min_lv}::method[#{method}]"
+    msg = "#{msg},#{message}" if not ( message.nil? or message.strip == '' )
+    puts msg
+  end
+end
 
 class M5
 # ---------------------------------------------------------------------
@@ -68,8 +80,8 @@ attr_writer :facts, :settings, :settings_type_int, :regex_ignore
 # -----------------------------------
 def initialize( debug_level=0 )
 
-  m_dbg = "method[#{__method__}]"
-  puts "DEBUG3::#{m_dbg}" if debug_level >= 3
+  m_name = "#{__method__}" # This function's (method) name ...
+  dbg_print( debug_level, 3, m_name )
 
   require 'socket'
   require 'timeout'
@@ -122,7 +134,7 @@ def initialize( debug_level=0 )
   if ENV.has_key?('M5_FACTS')
     facts_conf = ENV['M5_FACTS'] if ENV['M5_FACTS'].strip != ''
   end
-  puts "DEBUG4::#{m_dbg},Facts file[#{facts_conf}]" if debug_level >= 4
+  dbg_print( debug_level, 4, m_name, "Facts file[#{facts_conf}]" )
   facts_re = Regexp.compile('^FACT:(.*):(.*)$')
   File.open(facts_conf, 'r').each_line { |l|
     m = facts_re.match(l.strip)
@@ -131,7 +143,7 @@ def initialize( debug_level=0 )
     next if k.nil? or k == ''
     f, fv = [ k.gsub('COLON',':'), v.gsub('COLON',':') ]
     @facts[f] = fv
-    puts "DEBUG5::#{m_dbg},Fact[#{f}=#{fv}]" if debug_level >= 5
+    dbg_print( debug_level, 5, m_name, "Fact[#{f}=#{fv}]" )
   } if FileTest.readable?(facts_conf)
 
   # Setting types is used in converting ENV overrides to proper type ...
@@ -159,7 +171,7 @@ def initialize( debug_level=0 )
   if ENV.has_key?('M5_SETTINGS')
     settings_conf = ENV['M5_SETTINGS'] if ENV['M5_SETTINGS'].strip != ''
   end
-  puts "DEBUG4::#{m_dbg},Settings file[#{settings_conf}]" if debug_level >= 4
+  dbg_print( debug_level, 4, m_name, "Settings file[#{settings_conf}]" )
   settings_re = Regexp.compile('^SETTING:(.*):(.*)$')
   File.open(settings_conf, 'r').each_line { |l|
     m = settings_re.match(l.strip)
@@ -169,7 +181,7 @@ def initialize( debug_level=0 )
     s, sv = [ k.gsub('COLON',':'), v.gsub('COLON',':') ]
     sv = sv.to_i if @settings_type_int.include?(s)
     @settings[s] = sv
-    puts "DEBUG5::#{m_dbg},Setting[#{s}=#{sv}]" if debug_level >= 5
+    dbg_print( debug_level, 5, m_name, "Setting[#{s}=#{sv}]" )
   } if FileTest.readable?(settings_conf)
 
   # Regular expressions used in ignoring certain data retreived by methods.
@@ -214,12 +226,11 @@ def initialize( debug_level=0 )
     regex_ignore_conf = ENV['M5_REGEX_IGNORE'] \
       if ENV['M5_REGEX_IGNORE'].strip != ''
   end
-  puts "DEBUG4::#{m_dbg},Regex Ignore file[#{regex_ignore_conf}]" \
-    if debug_level >= 4
+  dbg_print(debug_level, 4, m_name, "Regex Ignore file[#{regex_ignore_conf}]")
   if FileTest.readable?(regex_ignore_conf)
     load regex_ignore_conf
     @regex_ignore.keys.each { |k|
-      @regex_ignore[k] = $regex_ignore[k].clone if $regex_ignore.has_key?(k)
+      @regex_ignore[k] = $regex_ignore[k].dup if $regex_ignore.has_key?(k)
     }
   end
 
@@ -236,14 +247,11 @@ def initialize( debug_level=0 )
 end
 
 # -----------------------------------
-# FUNCTION:  Print out in standard debug format.
+# FUNCTION:  Print out in standard debug format.  Use out of class method
+#            dbg_print.
 # -----------------------------------
 def print_debug( min_level, method, message=nil )
-  if @settings['DEBUG'] >= min_level
-    msg = "DEBUG#{min_level}::method[#{method}]"
-    msg = "#{msg},#{message}" if not ( message.nil? or message.strip == '' )
-    puts msg
-  end
+  dbg_print( @settings['DEBUG'], min_level, method, message )
 end
 
 ## -----------------------------------
@@ -1498,153 +1506,161 @@ if $0 == __FILE__
 $stderr.reopen $stdout # Sending STDERR to STDOUT ...
 $defout.sync = true    # Don't buffer I/O ...
 
-#
-# Get CGI options ...
-#
+begin
 
-require 'cgi'
-cgi = CGI.new()
-#
-# Get CGI options:
-#   - Lists are comma delimited.
-#   - methods - list of valid info_methods.
-#   - print - list of valid print methods.
-#   - debug - integer value 0 or higher.  Higher is more verbose.  Default 0.
-#
-cgi_methods = cgi.has_key?('methods') ? cgi['methods'].split(',') : []
-cgi_print = cgi.has_key?('print') ? cgi['print'].split(',') : []
-cgi_debug = cgi.has_key?('debug') ? cgi['debug'].to_i : 0
+  #
+  # Get CGI options ...
+  #
 
-# Look for environment override of DBG ...
-cgi_debug = ENV['M5_DBG'].to_i if ENV.has_key?('M5_DBG')
+  require 'cgi'
+  cgi = CGI.new()
+  #
+  # Get CGI options:
+  #   - Lists are comma delimited.
+  #   - methods - list of valid info_methods.
+  #   - print - list of valid print methods.
+  #   - debug - integer value 0 or higher.  Higher is more verbose.  Default 0.
+  #
+  cgi_methods = cgi.has_key?('methods') ? cgi['methods'].split(',') : []
+  cgi_print = cgi.has_key?('print') ? cgi['print'].split(',') : []
+  cgi_debug = cgi.has_key?('debug') ? cgi['debug'].to_i : 0
 
-#
-# Initializing ...
-#
+  # Look for environment override of DBG ...
+  cgi_debug = ENV['M5_DBG'].to_i if ENV.has_key?('M5_DBG')
 
-script = File.basename($0) # "This" script name ...
-m5 = M5.new(cgi_debug) # Main data object ...
+  #
+  # Initializing ...
+  #
 
-m5.print_debug( 5, "MAIN", "cgi_methods[#{cgi_methods}]" )
-m5.print_debug( 5, "MAIN", "cgi_print[#{cgi_print}]" )
-m5.print_debug( 5, "MAIN", "cgi_debug[#{cgi_debug}]" )
+  script = File.basename($0) # "This" script name ...
 
-# List of valid methods ...
-m5_prop = %w( pid node_name init_time facts settings )
-m_valid = m5_prop + m5.info_methods
+  m5 = M5.new(cgi_debug) # Main data object ...
 
-m5.print_debug( 5, "MAIN", "m5_prop[#{m5_prop.inspect}]" )
-m5.print_debug( 5, "MAIN", "Valid methods[#{m_valid.inspect}]" )
+  m5.print_debug( 5, "MAIN", "cgi_methods[#{cgi_methods}]" )
+  m5.print_debug( 5, "MAIN", "cgi_print[#{cgi_print}]" )
+  m5.print_debug( 5, "MAIN", "cgi_debug[#{cgi_debug}]" )
 
-#
-# Print help/usage as needed ...
-#
+  # List of valid methods ...
+  m5_prop = %w( pid node_name init_time facts settings )
+  m_valid = m5_prop + m5.info_methods
 
-if cgi_methods.include?('help') or cgi_methods.include?('usage')
-  puts <<END_OF_USAGE
+  m5.print_debug( 5, "MAIN", "m5_prop[#{m5_prop.inspect}]" )
+  m5.print_debug( 5, "MAIN", "Valid methods[#{m_valid.inspect}]" )
 
-USAGE:
+  #
+  # Print help/usage as needed ...
+  #
 
-  #{script} methods=<methods> [print=<inspect,jason,raw,yaml>] [debug=<num>]
+  if cgi_methods.include?('help') or cgi_methods.include?('usage')
+    puts <<END_OF_USAGE
 
-    ; <methods> - Comma delimited list of methods.
-    ; <debug> - Integer.  Higher number = more verbose.  Default 0.
+  USAGE:
 
-Valid methods ...
+    #{script} methods=<methods> [print=<inspect,jason,raw,yaml>] [debug=<num>]
 
-  help
-  usage
+      ; <methods> - Comma delimited list of methods.
+      ; <debug> - Integer.  Higher number = more verbose.  Default 0.
 
-#{m_valid.sort.map { |m| "  #{m}" }.join("\n")}
+  Valid methods ...
 
-EXAMPLE(S):
+    help
+    usage
 
-  #{script} methods=help
-  #{script} methods=usage  # Same as help.
-  #{script} methods=get_uname,get_iostat print=raw
-  #{script} methods=pid,get_loadavg print=raw,yaml
+  #{m_valid.sort.map { |m| "  #{m}" }.join("\n")}
 
-Settings that can have environment overrides ...
+  EXAMPLE(S):
 
-#{m5.settings.keys.sort.map { |m| "  #{m}" }.join("\n")}
+    #{script} methods=help
+    #{script} methods=usage  # Same as help.
+    #{script} methods=get_uname,get_iostat print=raw
+    #{script} methods=pid,get_loadavg print=raw,yaml
+
+  Settings that can have environment overrides ...
+
+  #{m5.settings.keys.sort.map { |m| "  #{m}" }.join("\n")}
 
 END_OF_USAGE
-  exit(1)
-end
+    exit(1)
+  end
 
-#
-# Look for setting's ENV overrides ...
-#
+  #
+  # Look for setting's ENV overrides ...
+  #
 
-m5.settings.keys.each { |k|
-  m5_k = "M5_#{k}"
-  next if not ENV.has_key?(m5_k)
-  m5.settings[k] = ENV[m5_k] if ENV[m5_k] != ''
-  m5.settings[k] = m5.settings[k].to_i if m5.settings_type_int.include?(k)
-  m5.print_debug( 5, "MAIN", "Override found for #{m5_k}[#{ENV[m5_k]}]" )
-}
+  m5.settings.keys.each { |k|
+    m5_k = "M5_#{k}"
+    next if not ENV.has_key?(m5_k)
+    m5.settings[k] = ENV[m5_k] if ENV[m5_k] != ''
+    m5.settings[k] = m5.settings[k].to_i if m5.settings_type_int.include?(k)
+    m5.print_debug( 5, "MAIN", "Override found for #{m5_k}[#{ENV[m5_k]}]" )
+  }
 
-#
-# Ensure WORKDIR exist.  If not create it ...
-#
-tmp_workdir = m5.settings['WORKDIR']
-tmp_workdir_found = if FileTest.exist?(tmp_workdir)
-  if FileTest.directory?(tmp_workdir)
-    true
-  else # Not a directory, delete it ...
-    File.delete(tmp_workdir)
+  #
+  # Ensure WORKDIR exist.  If not create it ...
+  #
+  tmp_workdir = m5.settings['WORKDIR']
+  tmp_workdir_found = if FileTest.exist?(tmp_workdir)
+    if FileTest.directory?(tmp_workdir)
+      true
+    else # Not a directory, delete it ...
+      File.delete(tmp_workdir)
+      false
+    end
+  else
     false
   end
-else
-  false
-end
-if not tmp_workdir_found
-  Dir.mkdir(tmp_workdir)
-end
-
-#
-# Build methods list to get ...
-#
-
-m_list = cgi_methods.map { |m|
-  if m_valid.include?(m) or m == "all"  # Check valid method or "all" ...
-    m
-  elsif m_valid.include?("get_#{m}")    # Short-hand label for method ...
-    "get_#{m}"
-  else
-    nil
+  if not tmp_workdir_found
+    Dir.mkdir(tmp_workdir)
   end
-}.compact
-# Default to all if empty list or "all" ...
-m_list = m_valid if ( m_list.empty? or m_list.include?("all") )
-m5.print_debug( 4, "MAIN", "Methods to exec[#{m_list.inspect}]" )
 
-#
-# Exec methods ...
-#
+  #
+  # Build methods list to get ...
+  #
 
-m5_out = {}
-threads = []
-m_list.each { |met|
-  threads << Thread.new( met ) { |m|
-    m5_out[m] = if m5.settings['DO_DIFF']
-      eval("m5.#{m}(#{m5.settings['DO_DIFF']})")
+  m_list = cgi_methods.map { |m|
+    if m_valid.include?(m) or m == "all"  # Check valid method or "all" ...
+      m
+    elsif m_valid.include?("get_#{m}")    # Short-hand label for method ...
+      "get_#{m}"
     else
-      eval("m5.#{m}")
+      nil
+    end
+  }.compact
+  # Default to all if empty list or "all" ...
+  m_list = m_valid if ( m_list.empty? or m_list.include?("all") )
+  m5.print_debug( 4, "MAIN", "Methods to exec[#{m_list.inspect}]" )
+
+  #
+  # Exec methods ...
+  #
+
+  m5_out = {}
+  threads = []
+  m_list.each { |met|
+    threads << Thread.new( met ) { |m|
+      m5_out[m] = if m5.settings['DO_DIFF']
+        eval("m5.#{m}(#{m5.settings['DO_DIFF']})")
+      else
+        eval("m5.#{m}")
+      end
+    }
+    while threads.find_all { |t|
+      t.alive?
+    }.length >= m5.settings['MAX_THREADS']
+      sleep(0.1)
     end
   }
-  while threads.find_all { |t|
-    t.alive?
-  }.length >= m5.settings['MAX_THREADS']
-    sleep(0.1)
-  end
-}
-threads.each { |t| t.join}
+  threads.each { |t| t.join}
 
-#
-# Print out if needed ...
-#
-m5.print_datum( m5_out, m5.raw_data, cgi_print ) if not cgi_print.empty?
+  #
+  # Print out if needed ...
+  #
+  m5.print_datum( m5_out, m5.raw_data, cgi_print ) if not cgi_print.empty?
+
+  rescue
+    m5.log_error( "MAIN", [$!.to_s.strip] )
+
+end
 
 exit(0)
 
