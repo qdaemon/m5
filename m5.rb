@@ -35,6 +35,7 @@
 #   cat
 #   diff
 #   dmidecode
+#   id -u
 #   iostat -x 1 2
 #   ip address show
 #   netstat -i
@@ -90,6 +91,27 @@ def initialize(
   debug_level=0
 )
 
+  # Method return codes.  To be eval'ed in functions ...
+  @moc = '"OK/#{__method__}"'
+  @mwc = '"WARNING/#{__method__}"'
+  @mec = '"ERROR/#{__method__}"'
+  @mfc = '"FATAL/#{__method__}"'
+
+  #
+  # Making sure this is invoked by 'root' (id=0) ...
+  #
+  tmp_root_found = false
+  IO.popen( 'id -u' ).each_line { |l|
+    if l.strip == '0'
+      tmp_root_found = true
+      break
+    end
+  }
+  if not tmp_root_found
+    puts "#{eval @mfc}::NA::Need to execute as 'root'"
+    exit(1)
+  end
+
   m_name = "#{__method__}" # This function's (method) name ...
   dbg_print( debug_level, 3, m_name )
 
@@ -109,12 +131,6 @@ def initialize(
 
   # "This" object's instantiation time ...
   @init_time = Time.new
-
-  # Method return codes.  To be eval'ed in functions ...
-  @moc = '"OK/#{__method__}"'
-  @mwc = '"WARNING/#{__method__}"'
-  @mec = '"ERROR/#{__method__}"'
-  @mfc = '"FATAL/#{__method__}"'
 
   # List of methods that pulls systems stats ...
   @info_methods = %w(
