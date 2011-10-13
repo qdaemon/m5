@@ -52,14 +52,22 @@
 #   vmstat
 #
 # TODO:
-# + mcron
+# + mcron.  Feature:  randomness within interval.
+#   Before/After actions.
 # + file change detection
+# + Only one m5.rb should be running at a time.  On start, detect others.  Kill
+#   if necessary before run.  If kill fail, don't run.
 #
 
 # -----------------------------------
 # FUNCTION:  Print out in standard debug format.
 # -----------------------------------
-def dbg_print( dbg_lv, min_lv, method, message=nil )
+def dbg_print(
+  dbg_lv,
+  min_lv,
+  method,
+  message=nil
+)
   if dbg_lv >= min_lv
     msg = "DEBUG#{min_lv}::method[#{method}]"
     msg = "#{msg},#{message}" if not ( message.nil? or message.strip == '' )
@@ -78,7 +86,9 @@ attr_writer :facts, :settings, :settings_type_int, :regex_ignore
 # -----------------------------------
 # FUNCTION:  Class initializer.
 # -----------------------------------
-def initialize( debug_level=0 )
+def initialize(
+  debug_level=0
+)
 
   m_name = "#{__method__}" # This function's (method) name ...
   dbg_print( debug_level, 3, m_name )
@@ -250,7 +260,11 @@ end
 # FUNCTION:  Print out in standard debug format.  Use out of class method
 #            dbg_print.
 # -----------------------------------
-def print_debug( min_level, method, message=nil )
+def print_debug(
+  min_level,
+  method,
+  message=nil
+)
   dbg_print( @settings['DEBUG'], min_level, method, message )
 end
 
@@ -276,7 +290,11 @@ end
 # -----------------------------------
 # FUNCTION:  Log errors ...
 # -----------------------------------
-def log_error( tag, data, log_file=@settings['ERRLOG'] )
+def log_error(
+  tag,
+  data,
+  log_file=@settings['ERRLOG']
+)
   m_name = "#{__method__}" # This function's (method) name ...
   print_debug( 3, "#{m_name}" )
   begin
@@ -297,7 +315,9 @@ end
 # FUNCTION:  Given some time object, calculate change in time since.
 # Return <change in time from current> in ms as %0.3f string format.
 # -----------------------------------
-def time_since( dtg )
+def time_since(
+  dtg
+)
   m_name = "#{__method__}" # This function's (method) name ...
   print_debug( 3, "#{m_name}" )
   return begin
@@ -315,7 +335,10 @@ end
 #            list are of the same sizes.
 # Return { key => val }
 # -----------------------------------
-def map_k_to_v( list_k, list_v )
+def map_k_to_v(
+  list_k,
+  list_v
+)
   rtn = {}
   m_name = "#{__method__}" # This function's (method) name ...
   print_debug( 3, "#{m_name}" )
@@ -336,7 +359,11 @@ end
 # FUNCTION:  Compare new file to old file.  Write out diffs.
 # Return [ diffs ]
 # -----------------------------------
-def file_diff( tag, file_new, file_old )
+def file_diff(
+  tag,
+  file_new,
+  file_old
+)
   rtn = []
   m_name = "#{__method__}" # This function's (method) name ...
   print_debug( 3, "#{m_name}" )
@@ -367,7 +394,11 @@ end
 #     'diff'     => nil or <diff>
 #   }
 # -----------------------------------
-def save_last_current( method_name, data, do_diff=@settings['DO_DIFF'] )
+def save_last_current(
+  method_name,
+  data,
+  do_diff=@settings['DO_DIFF']
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -407,7 +438,11 @@ end
 # FUNCTION:  Print data given output type.
 # Return <true>
 # -----------------------------------
-def print_datum( data_out, data_raw, out_type )
+def print_datum(
+  data_out,
+  data_raw,
+  out_type
+)
   m_name = "#{__method__}" # This function's (method) name ...
   print_debug( 3, "#{m_name}" )
   begin
@@ -438,7 +473,10 @@ end
 # FUNCTION:  Get ENV info.
 # Return [ <ENV info> ]
 # -----------------------------------
-def get_env( do_diff=true )
+def get_env(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
   rtn = {
     'code' => eval(@moc),
     'msg'  => nil,
@@ -449,7 +487,7 @@ def get_env( do_diff=true )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       @raw_data[m_name] = []
       ENV.each { |k,v|
         next if @regex_ignore['env'].match(k)
@@ -460,7 +498,7 @@ def get_env( do_diff=true )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -475,7 +513,10 @@ end
 # FUNCTION:  Get O/S release info.
 # Return [ <OS release info> ]
 # -----------------------------------
-def get_os_release( do_diff=true )
+def get_os_release(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
   rtn = {
     'code' => eval(@moc),
     'msg'  => nil,
@@ -486,7 +527,7 @@ def get_os_release( do_diff=true )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       # Supported (in order below):  Redhat, SuSE, Ubuntu ...
       %w(
         /etc/redhat-release
@@ -508,7 +549,7 @@ def get_os_release( do_diff=true )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -525,7 +566,10 @@ end
 # NOTES:  Expected 'uname' output format:
 #   <os_name> <host_name> <os_rel> <os_ver(3..-2)> <hdw_class(-1)>
 # ------------------------------
-def get_uname( do_diff=true )
+def get_uname(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -536,7 +580,7 @@ def get_uname( do_diff=true )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       @raw_data[m_name] = []
       rtn['res'] = IO.popen('uname -snrvm 2>&1').readlines.map { |l|
         @raw_data[m_name] << l
@@ -546,7 +590,7 @@ def get_uname( do_diff=true )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
     rescue
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
@@ -565,7 +609,10 @@ end
 #   as well as the amount of time since then that the system has been idle.
 #   Both are given as floating-point values, in seconds.
 # ------------------------------
-def get_uptime( do_diff=false )
+def get_uptime(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=false
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -576,7 +623,7 @@ def get_uptime( do_diff=false )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/uptime 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l
@@ -593,7 +640,7 @@ def get_uptime( do_diff=false )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -618,7 +665,10 @@ end
 #   processes on the system. The final entry is the process ID of the process
 #   that most recently ran.
 # ------------------------------
-def get_loadavg( do_diff=false )
+def get_loadavg(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=false
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -629,7 +679,7 @@ def get_loadavg( do_diff=false )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/loadavg 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l
@@ -645,7 +695,7 @@ def get_loadavg( do_diff=false )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to-sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -660,7 +710,10 @@ end
 # FUNCTION:  Get CPU info.
 # Return { key => val }
 # -----------------------------------
-def get_cpuinfo( do_diff=true )
+def get_cpuinfo(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -671,7 +724,7 @@ def get_cpuinfo( do_diff=true )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/cpuinfo 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l \
@@ -690,7 +743,7 @@ def get_cpuinfo( do_diff=true )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to-sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -715,7 +768,10 @@ end
 #   A+B+C = D = Actual memory system can utilize at the moment.  How much
 #       memory we should think is free.
 # ------------------------------
-def get_meminfo( do_diff=false )
+def get_meminfo(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=false
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -726,7 +782,7 @@ def get_meminfo( do_diff=false )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/meminfo 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l
@@ -754,7 +810,7 @@ def get_meminfo( do_diff=false )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to-sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -776,7 +832,10 @@ end
 #   pgmajfault - Number of major faults the system has made since boot, those
 #                which have required loading a memory  page from disk.
 # -----------------------------------
-def get_vmstat( do_diff=false )
+def get_vmstat(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=false
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -787,7 +846,7 @@ def get_vmstat( do_diff=false )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/vmstat 2>/dev/null').each_line { |l|
         @raw_data[m_name] << l
@@ -803,7 +862,7 @@ def get_vmstat( do_diff=false )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -822,7 +881,10 @@ end
 # Expected '/sbin/ip address show|grep inet|grep -v 127.0.0.1' output format:
 #   inet <addr/cdir> brd <broadcast addr> scope <scope> <interface>
 # ------------------------------
-def get_ip_bindings( do_diff=true )
+def get_ip_bindings(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -833,7 +895,7 @@ def get_ip_bindings( do_diff=true )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('ip address show 2>&1').each_line { |l|
         @raw_data[m_name] << l
@@ -851,7 +913,7 @@ def get_ip_bindings( do_diff=true )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -895,7 +957,10 @@ end
 #     m - Master
 #     s - Slave
 # ------------------------------
-def get_netstat_i( do_diff=false )
+def get_netstat_i(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=false
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -906,7 +971,7 @@ def get_netstat_i( do_diff=false )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       # Cycle until find '^Iface:', then start capture on next line.
       # Continue until first blank line ...
       start_cptr = false
@@ -935,7 +1000,7 @@ def get_netstat_i( do_diff=false )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -977,7 +1042,10 @@ end
 #               sent.
 #     UNKNOWN - The state of the socket is unknown.
 # ------------------------------
-def get_netstat_pant( do_diff=false )
+def get_netstat_pant(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=false
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -988,7 +1056,7 @@ def get_netstat_pant( do_diff=false )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       @raw_data[m_name] = []
       # Doing count for everyone else but LISTEN ...
       IO.popen('netstat -pant 2>&1').each_line { |l|
@@ -1019,7 +1087,7 @@ def get_netstat_pant( do_diff=false )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -1062,7 +1130,10 @@ end
 #     D - this route is dynamically created.
 #     ! - the route is a reject route and data will be dropped.
 # ------------------------------
-def get_netstat_rn( do_diff=true )
+def get_netstat_rn(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -1073,7 +1144,7 @@ def get_netstat_rn( do_diff=true )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       # Cycle until find '^Iface:', then start capture on next line.  Continue
       # until first blank line ...
       start_cptr = false
@@ -1099,7 +1170,7 @@ def get_netstat_rn( do_diff=true )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -1156,7 +1227,10 @@ end
 #   %util - percentage of CPU time during which the device was servicing
 #           requests.  100% means the device is fully saturated.
 # ------------------------------
-def get_iostat( do_diff=false )
+def get_iostat(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=false
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -1167,7 +1241,7 @@ def get_iostat( do_diff=false )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       # Cycle until find '^avg-cpu:', then capture.  Then look for '^Device:',
       # then capture ...
       fnd_cpu, cptr_cpu, item_cpu = [ false, false, nil ]
@@ -1214,7 +1288,7 @@ def get_iostat( do_diff=false )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -1241,7 +1315,10 @@ end
 #        Family: System x
 #  ...
 # ------------------------------
-def get_dmidecode( do_diff=true )
+def get_dmidecode(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -1252,7 +1329,7 @@ def get_dmidecode( do_diff=true )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       # Cycle until find System Information, then capture.  Stop after seeing
       # '^Handle' or after 10 lines ...
       found = false
@@ -1284,7 +1361,7 @@ def get_dmidecode( do_diff=true )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -1301,7 +1378,10 @@ end
 # Expected 'sysctl -a' output format:
 #   <key> = <value>
 # -----------------------------------
-def get_sysctl_a( do_diff=true )
+def get_sysctl_a(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -1312,7 +1392,7 @@ def get_sysctl_a( do_diff=true )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('sysctl -a 2>/dev/null | grep = | sort').each_line { |l|
         @raw_data[m_name] << l \
@@ -1331,7 +1411,7 @@ def get_sysctl_a( do_diff=true )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -1385,7 +1465,10 @@ end
 #     + - is in the foreground process group
 
 # ------------------------------
-def get_processes( do_diff=false )
+def get_processes(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=false
+)
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
@@ -1402,7 +1485,7 @@ def get_processes( do_diff=false )
   print_debug( 3, "#{m_name}" )
   begin
     time_start = Time.new
-    timeout( @settings['ACTION_TIMEOUT'] ) do
+    timeout( to_sec ) do
       p = 'ps axwww -o pid,ppid,user,rsz,vsz,stat,lstart,command'
       @raw_data[m_name] = []
       # Ignore first line ...
@@ -1479,7 +1562,7 @@ def get_processes( do_diff=false )
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{@settings['ACTION_TIMEOUT']}s)"
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
