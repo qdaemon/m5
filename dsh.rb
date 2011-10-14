@@ -346,6 +346,15 @@ USAGE(S):  #{$script_name} <-h|--help>
                   ssh options.  Note that this will in effect look at all hosts
                   as new hosts in ssh.  The "Warning:" message is suppressed!
 
+  --ssh-stricthostkeychk
+
+                  Optional.  If set, add "-o StrictHostKeyChecking=yes" to
+                  ssh options.  Default is "-o StrictHostKeyChecking=no".
+                  This option is to auto add keys for new or reinstalled hosts
+                  signatures.  We normally wouldn't do this with SSH, but saves
+                  on having to manually answer 'yes' each time for new boxes.
+                  Yes, it is an *unsecure* feature ...
+
   --step <m,n>    Optional.  Stepping thru list by <n>, starting at <m>.
                   If <n> is 0 or less, don't step.  If <n> is greater than 0,
                   then step by that <n>; e.g., if your server list is [ h1,
@@ -955,26 +964,23 @@ def fn_do_ssh(
     end
   end
 
-  # With option to auto add keys for new or reinstalled hosts signatures.
-  #   We normally wouldn't do this with SSH, but saves on having to manually
-  #   answer 'yes' each time for new boxes ...
-  this_cmd  = "ssh -x -p #{this_port} -o StrictHostKeyChecking=no"
-  this_cmd  = "#{this_cmd} #{ssh_opt}"
+  this_cmd  = "ssh -x -p #{this_port}"
+  this_cmd  += " #{ssh_opt}"
   if $arg_echo
-    this_cmd = "#{this_cmd} #{this_user}\@#{host} #{action}"
+    this_cmd += " #{this_user}\@#{host} #{action}"
     print "\n    ECHO-SUB::#{this_cmd}"
     return rtn_errors
   else
     if filename.nil?
       if enhanced_mode
-        this_cmd = "#{this_cmd} #{this_user}\@#{host} " +
+        this_cmd += " #{this_user}\@#{host} " +
                    "'#{shell}' 2>&1 << '##dsh##'\n#{action}\n##dsh##"
       else
-        this_cmd = "#{this_cmd} #{this_user}\@#{host} " +
+        this_cmd += " #{this_user}\@#{host} " +
                    "'#{action}' 2>&1"
       end
     else
-      this_cmd = "#{this_cmd} #{this_user}\@#{host} " +
+      this_cmd += " #{this_user}\@#{host} " +
                  "'#{shell}' 2>&1 < #{filename}"
     end
 
@@ -1199,7 +1205,8 @@ $max_class_ln = 0
 $max_line_ln  = 64    # Max characters to print on a given line ...
 $host_filter  = ''
 
-$suppress_ssh_newhostmsg = false # Set to true of "--ssh-knownhostsnull" used ...
+$suppress_ssh_newhostmsg = false # Set true if "--ssh-knownhostsnull" used ...
+$enable_stricthostkeychk = false # Default is "-o StrictHostKeyChecking=no" ...
 
 # Global hash to gather all output for comparision in the case where
 #   --hush-unique option is chosen ...
@@ -1229,42 +1236,43 @@ cmd_opts = GetoptLong.new
 # Get all command line options ...
 begin
   cmd_opts.set_options(
-    [ "--actions",      "-a", GetoptLong::REQUIRED_ARGUMENT ],
-    [ "--raw-actions",  "-A", GetoptLong::REQUIRED_ARGUMENT ],
-    [ "--display",      "-d", GetoptLong::NO_ARGUMENT       ],
-    [ "--echo",               GetoptLong::NO_ARGUMENT       ],
-    [ "--except",       "-e", GetoptLong::REQUIRED_ARGUMENT ],
-    [ "--file",         "-f", GetoptLong::REQUIRED_ARGUMENT ],
-    [ "--host-filter",        GetoptLong::REQUIRED_ARGUMENT ],
-    [ "--hush",               GetoptLong::NO_ARGUMENT       ],
-    [ "--hush-unique",        GetoptLong::NO_ARGUMENT       ],
-    [ "--interactive",  "-i", GetoptLong::NO_ARGUMENT       ],
-    [                   "-l", GetoptLong::NO_ARGUMENT       ],
-    [ "--legacy-mode",        GetoptLong::NO_ARGUMENT       ],
-    [ "--non-unix",     "-N", GetoptLong::NO_ARGUMENT       ],
-    [ "--log",          "-L", GetoptLong::REQUIRED_ARGUMENT ],
-    [ "--numbers",      "-n", GetoptLong::NO_ARGUMENT       ],
-    [ "--pseudo-tty",         GetoptLong::NO_ARGUMENT       ],
-    [ "--quiet",        "-q", GetoptLong::NO_ARGUMENT       ],
-    [ "--raw",                GetoptLong::NO_ARGUMENT       ],
-    [ "--raw_host",           GetoptLong::NO_ARGUMENT       ],
-    [ "--raw-host",           GetoptLong::NO_ARGUMENT       ],
-    [ "--servers",      "-s", GetoptLong::REQUIRED_ARGUMENT ],
-    [ "--show-class",         GetoptLong::OPTIONAL_ARGUMENT ],
-    [ "--find-class",         GetoptLong::OPTIONAL_ARGUMENT ],
-    [ "--show-host",          GetoptLong::OPTIONAL_ARGUMENT ],
-    [ "--find-host",          GetoptLong::OPTIONAL_ARGUMENT ],
-    [ "--ssh-quiet",          GetoptLong::NO_ARGUMENT       ],
-    [ "--ssh-knownhostsnull", GetoptLong::NO_ARGUMENT       ],
-    [ "--step",               GetoptLong::REQUIRED_ARGUMENT ],
-    [ "--sudo",         "-S", GetoptLong::NO_ARGUMENT       ],
-    [ "--threads",      "-t", GetoptLong::REQUIRED_ARGUMENT ],
-    [ "--user",         "-u", GetoptLong::REQUIRED_ARGUMENT ],
-    [                   "-w", GetoptLong::REQUIRED_ARGUMENT ],
-    [                   "-y", GetoptLong::NO_ARGUMENT       ],
-    [ "--stats",              GetoptLong::NO_ARGUMENT       ],
-    [ "--statistics",         GetoptLong::NO_ARGUMENT       ],
-    [ "--help",         "-h", GetoptLong::NO_ARGUMENT       ]
+    [ "--actions",      "-a",   GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--raw-actions",  "-A",   GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--display",      "-d",   GetoptLong::NO_ARGUMENT       ],
+    [ "--echo",                 GetoptLong::NO_ARGUMENT       ],
+    [ "--except",       "-e",   GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--file",         "-f",   GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--host-filter",          GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--hush",                 GetoptLong::NO_ARGUMENT       ],
+    [ "--hush-unique",          GetoptLong::NO_ARGUMENT       ],
+    [ "--interactive",  "-i",   GetoptLong::NO_ARGUMENT       ],
+    [                   "-l",   GetoptLong::NO_ARGUMENT       ],
+    [ "--legacy-mode",          GetoptLong::NO_ARGUMENT       ],
+    [ "--non-unix",     "-N",   GetoptLong::NO_ARGUMENT       ],
+    [ "--log",          "-L",   GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--numbers",      "-n",   GetoptLong::NO_ARGUMENT       ],
+    [ "--pseudo-tty",           GetoptLong::NO_ARGUMENT       ],
+    [ "--quiet",        "-q",   GetoptLong::NO_ARGUMENT       ],
+    [ "--raw",                  GetoptLong::NO_ARGUMENT       ],
+    [ "--raw_host",             GetoptLong::NO_ARGUMENT       ],
+    [ "--raw-host",             GetoptLong::NO_ARGUMENT       ],
+    [ "--servers",      "-s",   GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--show-class",           GetoptLong::OPTIONAL_ARGUMENT ],
+    [ "--find-class",           GetoptLong::OPTIONAL_ARGUMENT ],
+    [ "--show-host",            GetoptLong::OPTIONAL_ARGUMENT ],
+    [ "--find-host",            GetoptLong::OPTIONAL_ARGUMENT ],
+    [ "--ssh-quiet",            GetoptLong::NO_ARGUMENT       ],
+    [ "--ssh-knownhostsnull",   GetoptLong::NO_ARGUMENT       ],
+    [ "--ssh-stricthostkeychk", GetoptLong::NO_ARGUMENT       ],
+    [ "--step",                 GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--sudo",         "-S",   GetoptLong::NO_ARGUMENT       ],
+    [ "--threads",      "-t",   GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--user",         "-u",   GetoptLong::REQUIRED_ARGUMENT ],
+    [                   "-w",   GetoptLong::REQUIRED_ARGUMENT ],
+    [                   "-y",   GetoptLong::NO_ARGUMENT       ],
+    [ "--stats",                GetoptLong::NO_ARGUMENT       ],
+    [ "--statistics",           GetoptLong::NO_ARGUMENT       ],
+    [ "--help",         "-h",   GetoptLong::NO_ARGUMENT       ]
   )
   cmd_opts.each { |opt,arg|
     case opt
@@ -1281,24 +1289,24 @@ begin
       when        /--except$|-e$/ then arg_except           = arg.to_s
       when          /--file$|-f$/
         arg_file = arg.to_s
-        arg_ssh = "#{arg_ssh} -T"
+        arg_ssh += " -T"
       when       /--host-filter$/ then $host_filter         = arg.to_s
       when       /--hush-unique$/
         $arg_verbose = false
         $arg_unique = true
         show_ending_summation = false
-        arg_ssh = "#{arg_ssh} -q"
+        arg_ssh += " -q"
       when              /--hush$/
         $arg_verbose = false
         show_ending_summation = false
-        arg_ssh = "#{arg_ssh} -q"
+        arg_ssh += " -q"
       when   /--interactive$|-i$/ then arg_interactive      = true
       when                  /-l$/ then arg_local            = true
       when           /--log$|-L$/ then log_file             = arg.to_s
       when       /--numbers$|-n$/ then arg_numbers          = true
       when        /--pseudo-tty$/
         arg_tty = true
-        arg_ssh = "#{arg_ssh} -ttt"
+        arg_ssh += " -ttt"
       when         /--quiet$|-q$/ then $arg_verbose         = false
       when               /--raw$/
         $arg_verbose = false
@@ -1316,9 +1324,10 @@ begin
         fn_show_class('', arg.to_s)
         fn_exception( "SHOW_CLASS", "Display hosts in classes ...", 0, false )
       when         /--ssh-knownhostsnull$/
-        arg_ssh = "#{arg_ssh} -o UserKnownHostsFile=/dev/null"
         $suppress_ssh_newhostmsg = true
-      when         /--ssh-quiet$/ then arg_ssh              = "#{arg_ssh} -q"
+      when         /--ssh-stricthostkeychk$/
+        $enable_stricthostkeychk = true
+      when         /--ssh-quiet$/ then arg_ssh             += " -q"
       when              /--step$/
         arg_start, arg_step = arg.to_s.split(',')
         arg_start = arg_start.to_i
@@ -1337,6 +1346,8 @@ begin
         fn_exception( "HELP", "Usage ...", 0, true )
     end
   }
+  arg_ssh += " -o UserKnownHostsFile=/dev/null" if $suppress_ssh_newhostmsg
+  arg_ssh += " -o StrictHostKeyChecking=#{($enable_stricthostkeychk ? 'yes' : 'no')}"
   rescue
     fn_exception( "ERR", $!, 1, true )
 end
@@ -1344,9 +1355,7 @@ end
 #
 # Enabled SSH TTY allocation by default if not in legacy-mode ...
 #
-if arg_enhance
-  arg_ssh = "#{arg_ssh} -T"
-end
+arg_ssh += " -T" if arg_enhance
 
 #
 # Test log_file for suitability:  Exist? Writeable?
