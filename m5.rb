@@ -1665,20 +1665,31 @@ begin
     help
     usage
 
-  #{m_valid.sort.map { |m| "  #{m}" }.join("\n")}
+#{m_valid.sort.collect { |m| "    #{m}" }.join("\n")}
 
   EXAMPLE(S):
 
     #{script} methods=help
     #{script} methods=usage  # Same as help.
+    #{script} methods=list   # List available methods.
     #{script} methods=get_uname,get_iostat print=raw
     #{script} methods=pid,get_loadavg print=raw,yaml
 
   Settings that can have environment overrides ...
 
-  #{m5.settings.keys.sort.map { |m| "  #{m}" }.join("\n")}
+#{m5.settings.keys.sort.map { |m| "    #{m}" }.join("\n")}
 
 END_OF_USAGE
+    exit(1)
+  end
+
+  #
+  # List available methods ...
+  #
+
+  if cgi_methods.include?('list')
+    print "Available methods:\n\n"
+    print m_valid.sort.collect { |m| "    #{m}" }.join("\n") + "\n\n"
     exit(1)
   end
 
