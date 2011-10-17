@@ -3,30 +3,30 @@
 # Intelligent monitoring
 #   - Must run as "root".
 #
-# *** Configuration files:
+# *** Configuration files (OPTIONAL, all under /etc/m5/):
 #
-# + /etc/m5/facts.conf - User customizations.  Anything users want to add to
-#   what M5 returns.  Default location can be set with env variable M5_FACTS.
+# + facts.conf - User customizations.  Anything users want to add to what M5
+# returns.  Default location can be set with env variable M5_FACTS.
 #
-# + /etc/m5/settings.conf - App customizations.  Overrides of supported/default
-#   M5 parameters.  Default location can be set with env variable M5_SETTINGS.
+# + settings.conf - App customizations.  Overrides of supported/default M5
+# parameters.  Default location can be set with env variable M5_SETTINGS.
 #
-# + /etc/m5/regex_ignore.rb - App customizations.  Overrides of regex for
-#   specific methods to ignore data lines.  Default location can be set with
-#   env variable M5_REGEX_IGNORE.
+# + regex_ignore.rb - App customizations.  Overrides of regex for specific
+# methods to ignore data lines.  Default location can be set with env variable
+# M5_REGEX_IGNORE.
 #
 # *** General notes:
 #
-# + Requires ruby version >= 1.8.7
+# + Requires ruby version >= 1.8.7, though not tested against 1.9.x.
 #   - Using __method__ in functions to retrieve name of "this" function.
-#   - Not tested against version 1.9.x.
 #   - Requires JSON module (http://www.ping.de/~flori/json_pure-1.5.3.tgz).
 #
 # + Yes, "eval" is used ...
 #
 # + Any "NOTES" information below has been gotten by way of man pages, web
 # lookup, training materials, etc.  They are in no way my own, though I claim
-# full responsibilities for any errors.
+# full responsibilities for any errors or poor implementation/interpretation
+# there of.
 #
 # + For some reason "cat <file>" works better than "File.open <file>" when
 # dealing with "/proc" FS.
@@ -51,6 +51,8 @@
 #   meminfo
 #   uptime
 #   vmstat
+#
+
 #
 # TODO:
 # + mcron.  Feature:  randomness within interval.
@@ -188,8 +190,8 @@ def initialize(
     'DATUM_DELIM'      => 'DATUM:',           # Delimiter for data print out.
     'DEBUG'            => debug_level,        # Higher number = more verbose.
     'DIFFLOG'          => '/var/m5/diff.log', # Where diffs are logged.
-    'ERRLOG'           => '/var/m5/err.log',  # Where errors are logged.
     'DO_DIFF'          => false,              # Default is not to do diff.
+    'ERRLOG'           => '/var/m5/err.log',  # Where errors are logged.
     'MAX_THREADS'      => 4,                  # Max number of threads.
     'WORKDIR'          => '/var/m5',          # All temp and persist data.
   }
@@ -1608,24 +1610,21 @@ $defout.sync = true    # Don't buffer I/O ...
 begin
 
   #
-  # Get CGI options ...
-  #
-
-  require 'cgi'
-  cgi = CGI.new()
-  #
   # Get CGI options:
   #   - Lists are comma delimited.
   #   - methods - list of valid info_methods.
   #   - print - list of valid print methods.
   #   - debug - integer value 0 or higher.  Higher is more verbose.  Default 0.
   #
+
+  require 'cgi'
+  cgi = CGI.new()
   cgi_methods = cgi.has_key?('methods') ? cgi['methods'].split(',') : []
   cgi_print = cgi.has_key?('print') ? cgi['print'].split(',') : []
   cgi_debug = cgi.has_key?('debug') ? cgi['debug'].to_i : 0
 
   # Look for environment override of DBG ...
-  cgi_debug = ENV['M5_DBG'].to_i if ENV.has_key?('M5_DBG')
+  cgi_debug = ( ENV.has_key?('M5_DBG') ? ENV['M5_DBG'].to_i : 0 )
 
   #
   # Initializing ...
@@ -1675,7 +1674,7 @@ begin
     #{script} methods=get_uname,get_iostat print=raw
     #{script} methods=pid,get_loadavg print=raw,yaml
 
-  Settings that can have environment overrides ...
+  Settings that can have environment or settings.conf overrides ...
 
 #{m5.settings.keys.sort.map { |m| "    #{m}" }.join("\n")}
 
