@@ -1607,7 +1607,17 @@ if $0 == __FILE__
 $stderr.reopen $stdout # Sending STDERR to STDOUT ...
 $defout.sync = true    # Don't buffer I/O ...
 
+require 'timeout'
+
+# Global timeout.  Safety mechanism.  This should not take more than n
+#   seconds to run ...
+big_timeout = 30
+
 begin
+
+  # --------------------------------------------------------------------
+  timeout( big_timeout ) do
+  # --------------------------------------------------------------------
 
   #
   # Get CGI options:
@@ -1765,6 +1775,13 @@ END_OF_USAGE
   # Print out if needed ...
   #
   m5.print_datum( m5_out, m5.raw_data, cgi_print ) if not cgi_print.empty?
+
+  # --------------------------------------------------------------------
+  end # of timeout ...
+  # --------------------------------------------------------------------
+
+  rescue TimeoutError
+    puts "MAIN::FATAL::#{$!.to_s.strip} (ACTION_TIMEOUT=#{big_timeout}s)"
 
   rescue
     m5.log_error( "MAIN", [$!.to_s.strip] )
