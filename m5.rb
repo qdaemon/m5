@@ -136,22 +136,22 @@ def initialize(
 
   # List of methods that pulls systems stats ...
   @info_methods = %w(
-    get_env
-    get_os_release
-    get_uname
-    get_uptime
-    get_loadavg
     get_cpuinfo
-    get_meminfo
-    get_vmstat
+    get_dmidecode
+    get_env
+    get_iostat
     get_ip_bindings
+    get_loadavg
+    get_meminfo
     get_netstat_i
     get_netstat_pant
     get_netstat_rn
-    get_iostat
-    get_dmidecode
-    get_sysctl_a
+    get_os_release
     get_processes
+    get_sysctl_a
+    get_uname
+    get_uptime
+    get_vmstat
   )
 
   # Facts.  Reserve for customized "anything" that anyone wants returned ...
@@ -217,38 +217,39 @@ def initialize(
   # that begins with "M5_<regex_ignore>".  Default config file (for override)
   # is /etc/m5/regex_ignore.yml.  Location can be set with environment
   # variable M5_REGEX_IGNORE ...
-  @regex_ignore = {
-    'cpuinfo' => %r{
-      (
-          bogomips
-        | cpu\ MHz
-      )
-    }x,
-    'env' => %r{
-      (
-          ^_$
-        | DISPLAY
-        | OLDPWD
-        | XAUTHORITY
-        | XDG_SESSION_COOKIE
-      )
-    }x,
-    'sysctl_a' => %r{
-      (
-          ^error:
-        | fs.dentry-state
-        | fs.file-nr
-        | fs.inode-(nr|state)
-        | fs.quota.syncs
-        | kernel.pty.nr
-        | kernel.random.(boot_id|entropy_avail|uuid)
-        | \.netfilter.ip_conntrack_count
-        | \.random
-        | \.route.gc_timeout
-        | \.route.gc_interval
-      )
-    }x,
-  }
+  @regex_ignore = {}
+  @info_methods.each { |m| @regex_ignore[m] = nil }  # Init regex_ingore ...
+  # Some reasonable defaults ...
+  @regex_ignore['get_cpuinfo'] = %r{
+    (
+        ^bogomips
+      | ^cpu\ MHz
+    )
+  }x
+  @regex_ignore['get_env'] = %r{
+    (
+        ^_$
+      | DISPLAY
+      | OLDPWD
+      | XAUTHORITY
+      | XDG_SESSION_COOKIE
+    )
+  }x
+  @regex_ignore['get_sysctl_a'] = %r{
+    (
+        ^error:
+      | ^fs.dentry-state
+      | ^fs.file-nr
+      | ^fs.inode-(nr|state)
+      | ^fs.quota.syncs
+      | ^kernel.pty.nr
+      | ^kernel.random.(boot_id|entropy_avail|uuid)
+      | \.netfilter.ip_conntrack_count
+      | \.random
+      | \.route.gc_timeout
+      | \.route.gc_interval
+    )
+  }x
   regex_ignore_conf = '/etc/m5/regex_ignore.rb'
   if ENV.has_key?('M5_REGEX_IGNORE')
     regex_ignore_conf = ENV['M5_REGEX_IGNORE'] \
@@ -261,6 +262,9 @@ def initialize(
       @regex_ignore[k] = $regex_ignore[k].dup if $regex_ignore.has_key?(k)
     }
   end
+  @info_methods.each { |m|
+    @regex_ignore[m] = /^ThingThatShouldNeverMatch$/ if @regex_ignore[m].nil?
+  }  # Make sure regex_ignore is never nil ...
 
   # Raw data ...
   @raw_data = {}
@@ -442,7 +446,8 @@ def save_last_current(
         file_diff(method_name, rtn['res']['current'], rtn['res']['last']) \
         if do_diff and File.size(rtn['res']['last']) > 0
     else
-      rtn['code'], rtn['msg'] = [eval(@mwc), 'data argument empty']
+      rtn['code'], rtn['msg'] = [eval(@mwc), \
+        "[#{method_name}] data argument empty"]
       log_error( m_name, [rtn['msg']] )
     end
     rescue
@@ -488,6 +493,128 @@ end
 # *********************************************************************
 
 # -----------------------------------
+# FUNCTION:  Get CPU info.
+# Return { key => val }
+# -----------------------------------
+def get_cpuinfo(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
+  rtn = {
+    'code' => eval(@moc),
+    'msg' => nil,
+    'res' => {},
+    'res_save' => nil
+  }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
+  begin
+    time_start = Time.new
+    timeout( to_sec ) do
+      @raw_data[m_name] = []
+      IO.popen('cat /proc/cpuinfo 2>/dev/null').each_line { |l_raw|
+        l = l_raw.strip
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
+        if not l == ''
+          k, v = l.split(':').map { |i|
+            ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
+          }
+          next if k == '' or v == ''
+          rtn['res'][k] = [] if not rtn['res'].has_key?(k)
+          rtn['res'][k] << v
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{to-sec}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
+    rescue
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
+  end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
+  return rtn
+end
+
+# ------------------------------
+# FUNCTION:  Get DMI information.  Specifically, "System Information".
+# Return { key => val }
+# Expected 'dmidecode' output format:
+#  ...
+#  System Information
+#        Manufacturer: IBM
+#        Product Name: BladeCenter HS22 -[7870AC1]
+#        Version: 06
+#        Serial Number: 06C7477
+#        UUID: 4CBB62E8-9460-11DE-8C79-00215E91D964
+#        Wake-up Type: Other
+#        SKU Number: XxXxXxX
+#        Family: System x
+#  ...
+# ------------------------------
+def get_dmidecode(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
+  rtn = {
+    'code' => eval(@moc),
+    'msg' => nil,
+    'res' => {},
+    'res_save' => nil
+  }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
+  begin
+    time_start = Time.new
+    timeout( to_sec ) do
+      # Cycle until find System Information, then capture.  Stop after seeing
+      # '^Handle' or after 10 lines ...
+      found = false
+      start_capture = false
+      lines_gotten = 0
+      @raw_data[m_name] = []
+      IO.popen('dmidecode 2>&1').each_line { |l_raw|
+        l = l_raw.strip
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
+        break if lines_gotten > 10
+        if /^System Information/.match(l)
+            found = true
+            start_capture = true
+            print_debug( 6, "#{m_name}", "Start capture" )
+            next
+        elsif /^Handle /.match(l)
+            break if found and start_capture
+            start_capture = false
+        end
+        if start_capture
+          l_arr = l.split(':')
+          k = l_arr[0]
+          v = l_arr.slice(1..-1)
+          rtn['res'][k] = v.join(':') if (not k.nil?) and (v.class == Array)
+          lines_gotten += 1
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
+    rescue
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
+  end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
+  return rtn
+end
+
+# -----------------------------------
 # FUNCTION:  Get ENV info.
 # Return [ <ENV info> ]
 # -----------------------------------
@@ -508,10 +635,10 @@ def get_env(
     timeout( to_sec ) do
       @raw_data[m_name] = []
       ENV.each { |k,v|
-        next if @regex_ignore['env'].match(k)
+        print_debug( 6, "#{m_name}", "ENV[#{k}=#{v}]" )
+        next if @regex_ignore[m_name].match(k)
         rtn['res'][k] = v
         @raw_data[m_name] << "#{k}=#{v}"
-        print_debug( 6, "#{m_name}", "ENV[#{k}=#{v}]" )
       }
     end
     rtn['msg'] = time_since( time_start )
@@ -527,114 +654,141 @@ def get_env(
   return rtn
 end
 
-# -----------------------------------
-# FUNCTION:  Get O/S release info.
-# Return [ <OS release info> ]
-# -----------------------------------
-def get_os_release(
-  to_sec=@settings['ACTION_TIMEOUT'],
-  do_diff=true
-)
-  rtn = {
-    'code' => eval(@moc),
-    'msg'  => nil,
-    'res'  => [],
-    'res_save' => nil
-  }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
-  begin
-    time_start = Time.new
-    timeout( to_sec ) do
-      # Supported (in order below):  Redhat, SuSE, Ubuntu ...
-      %w(
-        /etc/redhat-release
-        /etc/SuSE-release
-        /etc/lsb-release
-      ).each { |f|
-        if FileTest.exist?(f)
-          print_debug( 5, "#{m_name}", "File[#{f}]" )
-          @raw_data[m_name] = []
-          rtn['res'] = File.open(f, 'r').readlines.map { |l|
-            @raw_data[m_name] << l
-            l.strip! ; ( l == '' ? nil : l )
-            print_debug( 6, "#{m_name}", "Line[#{l}]" )
-          }.compact
-          break
-        end
-      }
-      rtn['res'] << 'UNKNOWN' if rtn['res'].length < 1
-    end
-    rtn['msg'] = time_since( time_start )
-    rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
-      log_error( m_name, [rtn['msg']] )
-    rescue
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
-      log_error( m_name, [rtn['msg']] )
-  end
-  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
-  return rtn
-end
-
 # ------------------------------
-# FUNCTION:  Get uname info.
-# Return [ <output from 'uname'> ]
-# NOTES:  Expected 'uname' output format:
-#   <os_name> <host_name> <os_rel> <os_ver(3..-2)> <hdw_class(-1)>
+# FUNCTION:  Get iostat information.
+# Return {
+#          avg-cpu => {key => val, ...},
+#          Device => { dev => {key => val, ...}, ...}
+#   }
+# Expected 'iostat -x 1 2' output format:
+# (Ignoring the first set, and only picking up the second)
+#  ...
+# avg-cpu:  %user   %nice %system %iowait  %steal   %idle
+#            0.28    0.00    0.12    0.07    0.00   99.53
+#
+# Device: rrqm/s wrqm/s r/s w/s rsec/s wsec/s avgrq-sz avgqu-sz await svctm %util
+# sdb 0.00 0.00 0.00 0.00 0.00 0.00  48.38 0.00 2.86  2.29 0.00
+# sda 0.00 2.54 0.00 2.07 0.11 36.89 17.79 0.07 32.05 4.11 0.85
+#  ...
+# NOTES:
+#
+#   CPU ...
+#   %user - Show the percentage of CPU utilization that occurred while
+#           executing at the user level (application).
+#   %nice - Show the percentage of CPU utilization that occurred while
+#           executing at the user level with nice priority.
+#   %system - Show the percentage of CPU utilization that occurred while
+#             executing at the system level (kernel).
+#   %iowait - Show the percentage of time that the CPU or CPUs were idle during
+#             which the system had an outstanding  disk  I/O request.
+#   %steal - Show  the  percentage of time spent in involuntary wait by the
+#            virtual CPU or CPUs while the hypervisor was ser- vicing another
+#            virtual processor.
+#   %idle - Show the percentage of time that the CPU or CPUs were idle and the
+#           system did not have an outstanding  disk  I/O request.
+#
+#   Devices ...
+#   rrqm/s, wrqm/s - read/write requests merged per sec.
+#   r/s, w/s - read/write requests per sec.
+#   avgrq-sz - average size (in sectors) of the requests that were issued to
+#              device.
+#   avgqu-sz - average queue length of the requests that were issued to device.
+#   await - average time (in ms) between when a request is issued and when it
+#           is completed (time in queue + time for device to service request).
+#   svctm - average service time (in ms) for I/O requests that were issued to
+#           the device.
+#   %util - percentage of CPU time during which the device was servicing
+#           requests.  100% means the device is fully saturated.
 # ------------------------------
-def get_uname(
-  to_sec=@settings['ACTION_TIMEOUT'],
-  do_diff=true
-)
-  rtn = {
-    'code' => eval(@moc),
-    'msg' => nil,
-    'res' => [],
-    'res_save' => nil
-  }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
-  begin
-    time_start = Time.new
-    timeout( to_sec ) do
-      @raw_data[m_name] = []
-      rtn['res'] = IO.popen('uname -snrvm 2>&1').readlines.map { |l|
-        @raw_data[m_name] << l
-        l.strip! ; ( l == '' ? nil : l )
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
-      }.compact
-    end
-    rtn['msg'] = time_since( time_start )
-    rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
-    rescue
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
-      log_error( m_name, [rtn['msg']] )
-  end
-  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
-  return rtn
-end
-
-# ------------------------------
-# FUNCTION:  Get uptime info.
-# Return { uptime => val, idle => val }
-# Expected '/proc/uptime' output format:
-#   <uptime sec>, <idle time sec>
-# NOTES:  /proc/info contains the length of time since the system was booted,
-#   as well as the amount of time since then that the system has been idle.
-#   Both are given as floating-point values, in seconds.
-# ------------------------------
-def get_uptime(
+def get_iostat(
   to_sec=@settings['ACTION_TIMEOUT'],
   do_diff=false
 )
   rtn = {
     'code' => eval(@moc),
     'msg' => nil,
-    'res' => {'uptime' => nil, 'idle' => nil},
+    'res' => { 'avg-cpu' => {}, 'Device' => {} },
+    'res_save' => nil
+  }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
+  begin
+    time_start = Time.new
+    timeout( to_sec ) do
+      # Cycle until find '^avg-cpu:', then capture.  Then look for '^Device:',
+      # then capture ...
+      fnd_cpu, cptr_cpu, item_cpu = [ false, false, nil ]
+      fnd_dev, cptr_dev, item_dev = [ false, false, nil ]
+      set_found = 0
+      @raw_data[m_name] = []
+      IO.popen('iostat -x 1 2 2>&1').each_line { |l_raw|
+        l = l_raw.strip
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
+        set_found += 1 if /^avg-cpu:/.match(l)
+        if set_found == 2 # Only work on second set!
+          if not fnd_cpu and /^avg-cpu:/.match(l)
+              # Begin capture of CPU info.  Next line only ...
+              fnd_cpu, cptr_cpu = [ true, true ]
+              cptr_dev = false
+              item_cpu = l.split(':')[1].strip.split(/\s+/) # CPU keys list ...
+              item_cpu.each { |a| rtn['res']['avg-cpu'][a] = nil } # Init ...
+          elsif not fnd_dev and /^Device:/.match(l)
+              # Begin capture of devices until blank line detected ...
+              cptr_cpu = false
+              fnd_dev, cptr_dev = [ true, true ]
+              item_dev = l.split(':')[1].strip.split(/\s+/) # DEV keys list ...
+          else
+            if cptr_cpu
+              # Only grab one line after "avg-cpu:" ...
+              # Matching CPU values to CPU keys list found earlier ...
+              rtn['res']['avg-cpu'] = map_k_to_v(item_cpu, l.split(/\s+/))
+              cptr_cpu = false
+            elsif cptr_dev
+              # Keep grabbing device info until find blank line ...
+              if l == ''
+                cptr_dev = false
+              else
+                la = l.split(/\s+/)
+                # Matching DEV values to DEV keys list found earlier ...
+                rtn['res']['Device'][la[0]] \
+                  = map_k_to_v(item_dev, la.slice(1..-1))
+              end
+            end
+          end
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
+    rescue
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
+  end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
+  return rtn
+end
+
+# ------------------------------
+# FUNCTION:  Get all IP Addr and CIDR.
+# Return {
+#   iface = [addr1/CIDR,addr2/CIDR,...]
+# }
+# Expected '/sbin/ip address show|grep inet|grep -v 127.0.0.1' output format:
+#   inet <addr/cdir> brd <broadcast addr> scope <scope> <interface>
+# ------------------------------
+def get_ip_bindings(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
+  rtn = {
+    'code' => eval(@moc),
+    'msg' => nil,
+    'res' => {},
     'res_save' => nil
   }
   m_name = "#{__method__}" # This function's (method) name ...
@@ -643,16 +797,18 @@ def get_uptime(
     time_start = Time.new
     timeout( to_sec ) do
       @raw_data[m_name] = []
-      IO.popen('cat /proc/uptime 2>/dev/null').each_line { |l|
-        @raw_data[m_name] << l
-        l.strip!
+      IO.popen('ip address show 2>&1').each_line { |l_raw|
+        l = l_raw.strip
         print_debug( 6, "#{m_name}", "Line[#{l}]" )
-        if /^[0-9]+/.match(l)
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
+        if /\binet\b/.match(l)
           print_debug( 6, "#{m_name}", "Line matched!" )
-          upt, idl = l.split(/\s+/)
-          rtn['res']['uptime'] = upt.to_i
-          rtn['res']['idle'] = idl.to_i
-          break
+          l_arr = l.split(/\s+/)
+          ip_nic = l_arr[-1]
+          ip_addr = l_arr[1]
+          rtn['res'][ip_nic] = [] if not rtn['res'].has_key?(ip_nic)
+          rtn['res'][ip_nic] << ip_addr
         end
       }
     end
@@ -699,63 +855,16 @@ def get_loadavg(
     time_start = Time.new
     timeout( to_sec ) do
       @raw_data[m_name] = []
-      IO.popen('cat /proc/loadavg 2>/dev/null').each_line { |l|
-        @raw_data[m_name] << l
-        l.strip!
+      IO.popen('cat /proc/loadavg 2>/dev/null').each_line { |l_raw|
+        l = l_raw.strip
         print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
         if /^[0-9]+/.match(l)
           print_debug( 6, "#{m_name}", "Line matched!" )
           rtn['res']['m1'], rtn['res']['m5'], rtn['res']['m15'],
             dont_care, dont_care = l.split(/\s+/)
           break
-        end
-      }
-    end
-    rtn['msg'] = time_since( time_start )
-    rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{to-sec}s)"
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
-      log_error( m_name, [rtn['msg']] )
-    rescue
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
-      log_error( m_name, [rtn['msg']] )
-  end
-  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
-  return rtn
-end
-
-# -----------------------------------
-# FUNCTION:  Get CPU info.
-# Return { key => val }
-# -----------------------------------
-def get_cpuinfo(
-  to_sec=@settings['ACTION_TIMEOUT'],
-  do_diff=true
-)
-  rtn = {
-    'code' => eval(@moc),
-    'msg' => nil,
-    'res' => {},
-    'res_save' => nil
-  }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
-  begin
-    time_start = Time.new
-    timeout( to_sec ) do
-      @raw_data[m_name] = []
-      IO.popen('cat /proc/cpuinfo 2>/dev/null').each_line { |l|
-        @raw_data[m_name] << l \
-          if not @regex_ignore['cpuinfo'].match(l.split(':')[0].strip)
-        l.strip!
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
-        if not l == ''
-          k, v = l.split(':').map { |i|
-            ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
-          }
-          next if k == '' or v == ''
-          rtn['res'][k] = [] if not rtn['res'].has_key?(k)
-          rtn['res'][k] << v
         end
       }
     end
@@ -802,10 +911,11 @@ def get_meminfo(
     time_start = Time.new
     timeout( to_sec ) do
       @raw_data[m_name] = []
-      IO.popen('cat /proc/meminfo 2>/dev/null').each_line { |l|
-        @raw_data[m_name] << l
-        l.strip!
+      IO.popen('cat /proc/meminfo 2>/dev/null').each_line { |l_raw|
+        l = l_raw.strip
         print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
         if not l == ''
           k, v = l.split(':').map { |i|
             ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
@@ -829,109 +939,6 @@ def get_meminfo(
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{to-sec}s)"
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
-      log_error( m_name, [rtn['msg']] )
-    rescue
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
-      log_error( m_name, [rtn['msg']] )
-  end
-  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
-  return rtn
-end
-
-# -----------------------------------
-# FUNCTION:  Get vmstat info.
-# Return { key => val }
-# NOTES:  Some worthy keys to note ...
-#   Swap/Paging
-#     - Swap are pages which are not backed by a file (anonymous pages).
-#     - Pages which are backed by a file are subject to paging.
-#     - Unlike swapping, some amount of paging is normal and unavoidable.
-#   pgmajfault - Number of major faults the system has made since boot, those
-#                which have required loading a memory  page from disk.
-# -----------------------------------
-def get_vmstat(
-  to_sec=@settings['ACTION_TIMEOUT'],
-  do_diff=false
-)
-  rtn = {
-    'code' => eval(@moc),
-    'msg' => nil,
-    'res' => {},
-    'res_save' => nil
-  }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
-  begin
-    time_start = Time.new
-    timeout( to_sec ) do
-      @raw_data[m_name] = []
-      IO.popen('cat /proc/vmstat 2>/dev/null').each_line { |l|
-        @raw_data[m_name] << l
-        l.strip!
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
-        if not l == ''
-          k, v = l.split(/\s+/).map { |i|
-            ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
-          }
-          rtn['res'][k] = v if not ( k == '' or v == '' )
-        end
-      }
-    end
-    rtn['msg'] = time_since( time_start )
-    rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
-      log_error( m_name, [rtn['msg']] )
-    rescue
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
-      log_error( m_name, [rtn['msg']] )
-  end
-  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
-  return rtn
-end
-
-# ------------------------------
-# FUNCTION:  Get all IP Addr and CIDR.
-# Return {
-#   iface = [addr1/CIDR,addr2/CIDR,...]
-# }
-# Expected '/sbin/ip address show|grep inet|grep -v 127.0.0.1' output format:
-#   inet <addr/cdir> brd <broadcast addr> scope <scope> <interface>
-# ------------------------------
-def get_ip_bindings(
-  to_sec=@settings['ACTION_TIMEOUT'],
-  do_diff=true
-)
-  rtn = {
-    'code' => eval(@moc),
-    'msg' => nil,
-    'res' => {},
-    'res_save' => nil
-  }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
-  begin
-    time_start = Time.new
-    timeout( to_sec ) do
-      @raw_data[m_name] = []
-      IO.popen('ip address show 2>&1').each_line { |l|
-        @raw_data[m_name] << l
-        l.strip!
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
-        if /\binet\b/.match(l)
-          print_debug( 6, "#{m_name}", "Line matched!" )
-          l_arr = l.split(/\s+/)
-          ip_nic = l_arr[-1]
-          ip_addr = l_arr[1]
-          rtn['res'][ip_nic] = [] if not rtn['res'].has_key?(ip_nic)
-          rtn['res'][ip_nic] << ip_addr
-        end
-      }
-    end
-    rtn['msg'] = time_since( time_start )
-    rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
@@ -995,10 +1002,11 @@ def get_netstat_i(
       start_cptr = false
       item_iface = nil
       @raw_data[m_name] = []
-      IO.popen('netstat -i 2>&1').each_line { |l|
-        @raw_data[m_name] << l
-        l.strip!
+      IO.popen('netstat -i 2>&1').each_line { |l_raw|
+        l = l_raw.strip
         print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
         if not l == ''
           if /^Iface\b/.match(l)
             start_cptr = true
@@ -1077,10 +1085,11 @@ def get_netstat_pant(
     timeout( to_sec ) do
       @raw_data[m_name] = []
       # Doing count for everyone else but LISTEN ...
-      IO.popen('netstat -pant 2>&1').each_line { |l|
-        @raw_data[m_name] << l
-        l.strip!
+      IO.popen('netstat -pant 2>&1').each_line { |l_raw|
+        l = l_raw.strip
         print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
         if /^tcp\s+.*$/.match(l)
           line = l.split(/\s+/)
           state = line[5]
@@ -1168,10 +1177,11 @@ def get_netstat_rn(
       start_cptr = false
       item_route = nil
       @raw_data[m_name] = []
-      IO.popen('netstat -rn 2>&1').each_line { |l|
-        @raw_data[m_name] << l
-        l.strip!
+      IO.popen('netstat -rn 2>&1').each_line { |l_raw|
+        l = l_raw.strip
         print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
         if not l == ''
           if /^Destination\b/.match(l)
             start_cptr = true
@@ -1199,148 +1209,18 @@ def get_netstat_rn(
   return rtn
 end
 
-# ------------------------------
-# FUNCTION:  Get iostat information.
-# Return {
-#          avg-cpu => {key => val, ...},
-#          Device => { dev => {key => val, ...}, ...}
-#   }
-# Expected 'iostat -x 1 2' output format:
-# (Ignoring the first set, and only picking up the second)
-#  ...
-# avg-cpu:  %user   %nice %system %iowait  %steal   %idle
-#            0.28    0.00    0.12    0.07    0.00   99.53
-#
-# Device: rrqm/s wrqm/s r/s w/s rsec/s wsec/s avgrq-sz avgqu-sz await svctm %util
-# sdb 0.00 0.00 0.00 0.00 0.00 0.00  48.38 0.00 2.86  2.29 0.00
-# sda 0.00 2.54 0.00 2.07 0.11 36.89 17.79 0.07 32.05 4.11 0.85
-#  ...
-# NOTES:
-#
-#   CPU ...
-#   %user - Show the percentage of CPU utilization that occurred while
-#           executing at the user level (application).
-#   %nice - Show the percentage of CPU utilization that occurred while
-#           executing at the user level with nice priority.
-#   %system - Show the percentage of CPU utilization that occurred while
-#             executing at the system level (kernel).
-#   %iowait - Show the percentage of time that the CPU or CPUs were idle during
-#             which the system had an outstanding  disk  I/O request.
-#   %steal - Show  the  percentage of time spent in involuntary wait by the
-#            virtual CPU or CPUs while the hypervisor was ser- vicing another
-#            virtual processor.
-#   %idle - Show the percentage of time that the CPU or CPUs were idle and the
-#           system did not have an outstanding  disk  I/O request.
-#
-#   Devices ...
-#   rrqm/s, wrqm/s - read/write requests merged per sec.
-#   r/s, w/s - read/write requests per sec.
-#   avgrq-sz - average size (in sectors) of the requests that were issued to
-#              device.
-#   avgqu-sz - average queue length of the requests that were issued to device.
-#   await - average time (in ms) between when a request is issued and when it
-#           is completed (time in queue + time for device to service request).
-#   svctm - average service time (in ms) for I/O requests that were issued to
-#           the device.
-#   %util - percentage of CPU time during which the device was servicing
-#           requests.  100% means the device is fully saturated.
-# ------------------------------
-def get_iostat(
-  to_sec=@settings['ACTION_TIMEOUT'],
-  do_diff=false
-)
-  rtn = {
-    'code' => eval(@moc),
-    'msg' => nil,
-    'res' => { 'avg-cpu' => {}, 'Device' => {} },
-    'res_save' => nil
-  }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
-  begin
-    time_start = Time.new
-    timeout( to_sec ) do
-      # Cycle until find '^avg-cpu:', then capture.  Then look for '^Device:',
-      # then capture ...
-      fnd_cpu, cptr_cpu, item_cpu = [ false, false, nil ]
-      fnd_dev, cptr_dev, item_dev = [ false, false, nil ]
-      set_found = 0
-      @raw_data[m_name] = []
-      IO.popen('iostat -x 1 2 2>&1').each_line { |l|
-        @raw_data[m_name] << l
-        l.strip!
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
-        set_found += 1 if /^avg-cpu:/.match(l)
-        if set_found == 2 # Only work on second set!
-          if not fnd_cpu and /^avg-cpu:/.match(l)
-              # Begin capture of CPU info.  Next line only ...
-              fnd_cpu, cptr_cpu = [ true, true ]
-              cptr_dev = false
-              item_cpu = l.split(':')[1].strip.split(/\s+/) # CPU keys list ...
-              item_cpu.each { |a| rtn['res']['avg-cpu'][a] = nil } # Init ...
-          elsif not fnd_dev and /^Device:/.match(l)
-              # Begin capture of devices until blank line detected ...
-              cptr_cpu = false
-              fnd_dev, cptr_dev = [ true, true ]
-              item_dev = l.split(':')[1].strip.split(/\s+/) # DEV keys list ...
-          else
-            if cptr_cpu
-              # Only grab one line after "avg-cpu:" ...
-              # Matching CPU values to CPU keys list found earlier ...
-              rtn['res']['avg-cpu'] = map_k_to_v(item_cpu, l.split(/\s+/))
-              cptr_cpu = false
-            elsif cptr_dev
-              # Keep grabbing device info until find blank line ...
-              if l == ''
-                cptr_dev = false
-              else
-                la = l.split(/\s+/)
-                # Matching DEV values to DEV keys list found earlier ...
-                rtn['res']['Device'][la[0]] \
-                  = map_k_to_v(item_dev, la.slice(1..-1))
-              end
-            end
-          end
-        end
-      }
-    end
-    rtn['msg'] = time_since( time_start )
-    rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
-      log_error( m_name, [rtn['msg']] )
-    rescue
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
-      log_error( m_name, [rtn['msg']] )
-  end
-  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
-  return rtn
-end
-
-# ------------------------------
-# FUNCTION:  Get DMI information.  Specifically, "System Information".
-# Return { key => val }
-# Expected 'dmidecode' output format:
-#  ...
-#  System Information
-#        Manufacturer: IBM
-#        Product Name: BladeCenter HS22 -[7870AC1]
-#        Version: 06
-#        Serial Number: 06C7477
-#        UUID: 4CBB62E8-9460-11DE-8C79-00215E91D964
-#        Wake-up Type: Other
-#        SKU Number: XxXxXxX
-#        Family: System x
-#  ...
-# ------------------------------
-def get_dmidecode(
+# -----------------------------------
+# FUNCTION:  Get O/S release info.
+# Return [ <OS release info> ]
+# -----------------------------------
+def get_os_release(
   to_sec=@settings['ACTION_TIMEOUT'],
   do_diff=true
 )
   rtn = {
     'code' => eval(@moc),
-    'msg' => nil,
-    'res' => {},
+    'msg'  => nil,
+    'res'  => [],
     'res_save' => nil
   }
   m_name = "#{__method__}" # This function's (method) name ...
@@ -1348,84 +1228,26 @@ def get_dmidecode(
   begin
     time_start = Time.new
     timeout( to_sec ) do
-      # Cycle until find System Information, then capture.  Stop after seeing
-      # '^Handle' or after 10 lines ...
-      found = false
-      start_capture = false
-      lines_gotten = 0
-      @raw_data[m_name] = []
-      IO.popen('dmidecode 2>&1').each_line { |l|
-        @raw_data[m_name] << l
-        break if lines_gotten > 10
-        l.strip!
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
-        if /^System Information/.match(l)
-            found = true
-            start_capture = true
-            print_debug( 6, "#{m_name}", "Start capture" )
-            next
-        elsif /^Handle /.match(l)
-            break if found and start_capture
-            start_capture = false
-        end
-        if start_capture
-          l_arr = l.split(':')
-          k = l_arr[0]
-          v = l_arr.slice(1..-1)
-          rtn['res'][k] = v.join(':') if (not k.nil?) and (v.class == Array)
-          lines_gotten += 1
+      # Supported (in order below):  Redhat, SuSE, Ubuntu ...
+      %w(
+        /etc/redhat-release
+        /etc/SuSE-release
+        /etc/lsb-release
+      ).each { |f|
+        if FileTest.exist?(f)
+          print_debug( 5, "#{m_name}", "File[#{f}]" )
+          @raw_data[m_name] = []
+          rtn['res'] = File.open(f, 'r').readlines.map { |l_raw|
+            l = l_raw.strip
+            print_debug( 6, "#{m_name}", "Line[#{l}]" )
+            next if @regex_ignore[m_name].match(l)
+            @raw_data[m_name] << l_raw
+            ( l == '' ? nil : l )
+          }.compact
+          break
         end
       }
-    end
-    rtn['msg'] = time_since( time_start )
-    rescue TimeoutError
-      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
-      log_error( m_name, [rtn['msg']] )
-    rescue
-      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
-      log_error( m_name, [rtn['msg']] )
-  end
-  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
-  return rtn
-end
-
-# -----------------------------------
-# FUNCTION:  Get sysctl info.
-# Return { key => val }
-# Expected 'sysctl -a' output format:
-#   <key> = <value>
-# -----------------------------------
-def get_sysctl_a(
-  to_sec=@settings['ACTION_TIMEOUT'],
-  do_diff=true
-)
-  rtn = {
-    'code' => eval(@moc),
-    'msg' => nil,
-    'res' => {},
-    'res_save' => nil
-  }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
-  begin
-    time_start = Time.new
-    timeout( to_sec ) do
-      @raw_data[m_name] = []
-      IO.popen('sysctl -a 2>/dev/null | grep = | sort').each_line { |l|
-        @raw_data[m_name] << l \
-          if not @regex_ignore['sysctl_a'].match(l.split('=')[0].strip)
-        l.strip!
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
-        if not l == '' and /=/.match(l)
-          k, v = l.split('=').map { |i|
-            ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
-          }
-          next if k == '' or v == ''
-          rtn['res'][k] = [] if not rtn['res'].has_key?(k)
-          rtn['res'][k] << v
-        end
-      }
+      rtn['res'] << 'UNKNOWN' if rtn['res'].length < 1
     end
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
@@ -1507,10 +1329,11 @@ def get_processes(
       p = 'ps axwww -o pid,ppid,user,rsz,vsz,stat,lstart,command'
       @raw_data[m_name] = []
       # Ignore first line ...
-      IO.popen("#{p} 2>&1").readlines.slice(1..-1).each { |l|
-        @raw_data[m_name] << l
-        l.strip!
+      IO.popen("#{p} 2>&1").readlines.slice(1..-1).each { |l_raw|
+        l = l_raw.strip
         print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
         i = l.split(/\s+/)
         #
         # Filter out 'this' process and its children ...
@@ -1575,6 +1398,203 @@ def get_processes(
           rtn['res']['ppid'][i_ppid] << i_pid
         else
           print_debug( 6, "#{m_name}", "Ignoring[#{i.inspect}]" )
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
+    rescue
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
+  end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
+  return rtn
+end
+
+# -----------------------------------
+# FUNCTION:  Get sysctl info.
+# Return { key => val }
+# Expected 'sysctl -a' output format:
+#   <key> = <value>
+# -----------------------------------
+def get_sysctl_a(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
+  rtn = {
+    'code' => eval(@moc),
+    'msg' => nil,
+    'res' => {},
+    'res_save' => nil
+  }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
+  begin
+    time_start = Time.new
+    timeout( to_sec ) do
+      @raw_data[m_name] = []
+      IO.popen('sysctl -a 2>/dev/null | grep = | sort').each_line { |l_raw|
+        l = l_raw.strip
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
+        if not l == '' and /=/.match(l)
+          k, v = l.split('=').map { |i|
+            ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
+          }
+          next if k == '' or v == ''
+          rtn['res'][k] = [] if not rtn['res'].has_key?(k)
+          rtn['res'][k] << v
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
+    rescue
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
+  end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
+  return rtn
+end
+
+# ------------------------------
+# FUNCTION:  Get uname info.
+# Return [ <output from 'uname'> ]
+# NOTES:  Expected 'uname' output format:
+#   <os_name> <host_name> <os_rel> <os_ver(3..-2)> <hdw_class(-1)>
+# ------------------------------
+def get_uname(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=true
+)
+  rtn = {
+    'code' => eval(@moc),
+    'msg' => nil,
+    'res' => [],
+    'res_save' => nil
+  }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
+  begin
+    time_start = Time.new
+    timeout( to_sec ) do
+      @raw_data[m_name] = []
+      rtn['res'] = IO.popen('uname -snrvm 2>&1').readlines.map { |l_raw|
+        l = l_raw.strip
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
+        ( l == '' ? nil : l )
+      }.compact
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+    rescue
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
+  end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
+  return rtn
+end
+
+# ------------------------------
+# FUNCTION:  Get uptime info.
+# Return { uptime => val, idle => val }
+# Expected '/proc/uptime' output format:
+#   <uptime sec>, <idle time sec>
+# NOTES:  /proc/info contains the length of time since the system was booted,
+#   as well as the amount of time since then that the system has been idle.
+#   Both are given as floating-point values, in seconds.
+# ------------------------------
+def get_uptime(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=false
+)
+  rtn = {
+    'code' => eval(@moc),
+    'msg' => nil,
+    'res' => {'uptime' => nil, 'idle' => nil},
+    'res_save' => nil
+  }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
+  begin
+    time_start = Time.new
+    timeout( to_sec ) do
+      @raw_data[m_name] = []
+      IO.popen('cat /proc/uptime 2>/dev/null').each_line { |l_raw|
+        l = l_raw.strip
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
+        if /^[0-9]+/.match(l)
+          print_debug( 6, "#{m_name}", "Line matched!" )
+          upt, idl = l.split(/\s+/)
+          rtn['res']['uptime'] = upt.to_i
+          rtn['res']['idle'] = idl.to_i
+          break
+        end
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
+    rescue
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
+  end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
+  return rtn
+end
+
+# -----------------------------------
+# FUNCTION:  Get vmstat info.
+# Return { key => val }
+# NOTES:  Some worthy keys to note ...
+#   Swap/Paging
+#     - Swap are pages which are not backed by a file (anonymous pages).
+#     - Pages which are backed by a file are subject to paging.
+#     - Unlike swapping, some amount of paging is normal and unavoidable.
+#   pgmajfault - Number of major faults the system has made since boot, those
+#                which have required loading a memory  page from disk.
+# -----------------------------------
+def get_vmstat(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=false
+)
+  rtn = {
+    'code' => eval(@moc),
+    'msg' => nil,
+    'res' => {},
+    'res_save' => nil
+  }
+  m_name = "#{__method__}" # This function's (method) name ...
+  print_debug( 3, "#{m_name}" )
+  begin
+    time_start = Time.new
+    timeout( to_sec ) do
+      @raw_data[m_name] = []
+      IO.popen('cat /proc/vmstat 2>/dev/null').each_line { |l_raw|
+        l = l_raw.strip
+        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
+        if not l == ''
+          k, v = l.split(/\s+/).map { |i|
+            ( i.nil? ? '' : i.strip ).gsub(/\s+/,' ')
+          }
+          rtn['res'][k] = v if not ( k == '' or v == '' )
         end
       }
     end
