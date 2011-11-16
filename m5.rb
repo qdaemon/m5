@@ -894,6 +894,8 @@ end
 #       free + the memory system hasn't used.
 #   A+B+C = D = Actual memory system can utilize at the moment.  How much
 #       memory we should think is free.
+#   Need to watch for "Dirty" as too much build up means next "flush/sync"
+#       will result in high I/O to disk and possibly overwhelm disk.
 # ------------------------------
 def get_meminfo(
   to_sec=@settings['ACTION_TIMEOUT'],
