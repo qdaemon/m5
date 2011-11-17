@@ -55,6 +55,7 @@
 
 #
 # TODO:
+# + Review debug print, and standardize debug numbering.
 # + mcron.  Feature:  randomness within interval.
 #   Before/After actions.
 # + file change detection
@@ -76,6 +77,47 @@ def dbg_print(
     msg = "#{msg},#{message}" if not ( message.nil? or message.strip == '' )
     puts msg
   end
+  return true
+end
+
+# -----------------------------------
+# FUNCTION:  Print help/usage.
+# -----------------------------------
+def print_usage(
+  script,
+  methods,
+  settings
+)
+  puts <<END_OF_USAGE
+
+  USAGE:
+
+    #{script} methods=<methods> [print=<inspect,json,raw,yaml>] [debug=<num>]
+
+      ; <methods> - Comma delimited list of methods.
+      ; <debug> - Integer.  Higher number = more verbose.  Default 0.
+
+  Valid methods ...
+
+    help
+    usage
+
+#{methods.sort.collect { |m| "    #{m}" }.join("\n")}
+
+  EXAMPLE(S):
+
+    #{script} methods=help
+    #{script} methods=usage  # Same as help.
+    #{script} methods=list   # List available methods.
+    #{script} methods=get_uname,get_iostat print=raw
+    #{script} methods=pid,get_loadavg print=raw,yaml
+
+  Settings that can have environment or settings.conf overrides ...
+
+#{settings.keys.sort.map { |m| "    #{m}" }.join("\n")}
+
+END_OF_USAGE
+  return true
 end
 
 class M5
@@ -1656,7 +1698,7 @@ begin
   cgi_debug = cgi.has_key?('debug') ? cgi['debug'].to_i : 0
 
   # Look for environment override of DBG ...
-  cgi_debug = ( ENV.has_key?('M5_DBG') ? ENV['M5_DBG'].to_i : 0 )
+  cgi_debug = ( ENV.has_key?('M5_DBG') ? ENV['M5_DBG'].to_i : cgi_debug )
 
   #
   # Initializing ...
@@ -1677,40 +1719,15 @@ begin
   m5.print_debug( 5, "MAIN", "m5_prop[#{m5_prop.inspect}]" )
   m5.print_debug( 5, "MAIN", "Valid methods[#{m_valid.inspect}]" )
 
-  #
-  # Print help/usage as needed ...
-  #
-
-  if cgi_methods.include?('help') or cgi_methods.include?('usage')
-    puts <<END_OF_USAGE
-
-  USAGE:
-
-    #{script} methods=<methods> [print=<inspect,jason,raw,yaml>] [debug=<num>]
-
-      ; <methods> - Comma delimited list of methods.
-      ; <debug> - Integer.  Higher number = more verbose.  Default 0.
-
-  Valid methods ...
-
-    help
-    usage
-
-#{m_valid.sort.collect { |m| "    #{m}" }.join("\n")}
-
-  EXAMPLE(S):
-
-    #{script} methods=help
-    #{script} methods=usage  # Same as help.
-    #{script} methods=list   # List available methods.
-    #{script} methods=get_uname,get_iostat print=raw
-    #{script} methods=pid,get_loadavg print=raw,yaml
-
-  Settings that can have environment or settings.conf overrides ...
-
-#{m5.settings.keys.sort.map { |m| "    #{m}" }.join("\n")}
-
-END_OF_USAGE
+  # Print out usage if required ...
+  all_valid_methods = \
+      m_valid \
+    + m_valid.collect { |m| m.gsub(/^get_/,'') } \
+    + [ 'all' ]
+  m5.print_debug( 5, "MAIN", "All valid methods[#{all_valid_methods.inspect}]" )
+  if cgi_methods - [ 'help', 'usage' ] != cgi_methods or
+     all_valid_methods - cgi_methods == all_valid_methods
+    print_usage( script, m_valid, m5.settings )
     exit(1)
   end
 
