@@ -24,6 +24,10 @@ $regex_ignore['get_env'] = %r{
       ^_$
     | DISPLAY
     | OLDPWD
+    | PWD
+    | SSH_CLIENT
+    | SSH_CONNECTION
+    | SSH_TTY
     | XAUTHORITY
     | XDG_SESSION_COOKIE
   )$
@@ -39,6 +43,7 @@ $regex_ignore['get_sysctl_a'] = %r{
     | ^kernel.pty.nr
     | ^kernel.random.(boot_id|entropy_avail|uuid)
     | \.netfilter.ip_conntrack_count
+    | \.netfilter.nf_conntrack_count
     | \.random
     | \.route.gc_timeout
     | \.route.gc_interval
