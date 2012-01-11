@@ -1,12 +1,13 @@
 #!/usr/bin/env ruby
 #
-# Intelligent monitoring
+# Adaptive monitoring
 #   - Must run as "root".
 #
 # *** Configuration files (OPTIONAL, all under /etc/m5/):
 #
 # + facts.conf - User customizations.  Anything users want to add to what M5
-# returns.  Default location can be set with env variable M5_FACTS.
+# returns.  Default location can be set with env variable M5_FACTS.  NOTE(!)
+# that facts are also set as part of environment variables.
 #
 # + settings.conf - App customizations.  Overrides of supported/default M5
 # parameters.  Default location can be set with env variable M5_SETTINGS.
@@ -52,15 +53,9 @@
 #   uptime
 #   vmstat
 #
-
-#
-# TODO:
-# + Review debug print, and standardize debug numbering.
-# + mcron.  Feature:  randomness within interval.
-#   Before/After actions.
-# + file change detection
-# + Only one m5.rb should be running at a time.  On start, detect others.  Kill
-#   if necessary before run.  If kill fail, don't run.
+# + DEBUG level guidelines:
+#   - 0: No DEBUG
+#   - 1: In which function
 #
 
 # -----------------------------------
@@ -135,6 +130,9 @@ def initialize(
   debug_level=0
 )
 
+  # Set standard environment PATH ...
+  ENV['PATH'] = "#{ENV['PATH']}:/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin"
+
   # Method return codes.  To be eval'ed in functions ...
   @moc = '"OK/#{__method__}"'
   @mwc = '"WARNING/#{__method__}"'
@@ -156,8 +154,8 @@ def initialize(
     exit(1)
   end
 
-  m_name = "#{__method__}" # This function's (method) name ...
-  dbg_print( debug_level, 3, m_name )
+  m_name = "#{__method__}"
+  dbg_print( debug_level, 1, m_name )
 
   require 'socket'
   require 'timeout'
@@ -196,9 +194,11 @@ def initialize(
     get_vmstat
   )
 
-  # Facts.  Reserve for customized "anything" that anyone wants returned ...
-  # Default config file for facts is /etc/m5/facts.conf.  Location can be set
-  # with enviroment variable M5_FACTS ...
+  # Facts:
+  #   * Reserve for customized "anything" that anyone wants returned.
+  #   * Default config file for facts is /etc/m5/facts.conf.  Location can be
+  #     set with enviroment variable M5_FACTS.
+  #   * Set in the environment (ENV).  Override ENV settings.
   @facts = {}
   facts_conf = '/etc/m5/facts.conf'
   if ENV.has_key?('M5_FACTS')
@@ -213,6 +213,7 @@ def initialize(
     next if k.nil? or k == ''
     f, fv = [ k.gsub('COLON',':'), v.gsub('COLON',':') ]
     @facts[f] = fv
+    ENV[f] = fv
     dbg_print( debug_level, 5, m_name, "Fact[#{f}=#{fv}]" )
   } if FileTest.readable?(facts_conf)
 
@@ -344,8 +345,8 @@ end
 #    + dtg.strftime("%z")
 #end
 def time_now
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   return Time.new.strftime(@time_fmt)
 end
 
@@ -357,8 +358,8 @@ def log_error(
   data,
   log_file=@settings['ERRLOG']
 )
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     tag = "#{tag}-#{(0..8).map{ charset.to_a[rand(charset.size)] }.join}"
     log = File.open(log_file, 'a+')
@@ -380,8 +381,8 @@ end
 def time_since(
   dtg
 )
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   return begin
     sprintf("%0.6f microsec", Time.new - dtg)
     rescue
@@ -402,8 +403,8 @@ def map_k_to_v(
   list_v
 )
   rtn = {}
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     if list_k.length == list_v.length
       count = 0 ; list_k.each { |k| rtn[k] = list_v[count] ; count += 1 }
@@ -427,8 +428,8 @@ def file_diff(
   file_old
 )
   rtn = []
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     tag = "#{tag}-#{(0..8).map{ charset.to_a[rand(charset.size)] }.join}"
     IO.popen("diff #{file_new} #{file_old} 2>/dev/null").each_line { |l|
@@ -470,8 +471,8 @@ def save_last_current(
       'diff'     => nil
     }
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     # Only save if there is something to save ...
     if data.length > 0
@@ -506,8 +507,8 @@ def print_datum(
   data_raw,
   out_type
 )
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     pre = @settings['DATUM_DELIM']
     print "Content-type: text/plain\n\n"
@@ -546,8 +547,8 @@ def get_cpuinfo(
     'res' => {},
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -606,8 +607,8 @@ def get_dmidecode(
     'res' => {},
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -668,8 +669,8 @@ def get_env(
     'res'  => {},
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -750,8 +751,8 @@ def get_iostat(
     'res' => { 'avg-cpu' => {}, 'Device' => {} },
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -831,8 +832,8 @@ def get_ip_bindings(
     'res' => {},
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -889,8 +890,8 @@ def get_loadavg(
     'res' => {'m1' => nil, 'm5' => nil, 'm15' => nil},
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -947,8 +948,8 @@ def get_meminfo(
     'res' => {},
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1034,8 +1035,8 @@ def get_netstat_i(
     'res' => {},
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1120,8 +1121,8 @@ def get_netstat_pant(
     'res' => {},
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1209,8 +1210,8 @@ def get_netstat_rn(
     'res' => {},
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1265,8 +1266,8 @@ def get_os_release(
     'res'  => [],
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1363,8 +1364,8 @@ def get_processes(
     },
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1472,8 +1473,8 @@ def get_sysctl_a(
     'res' => {},
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1522,8 +1523,8 @@ def get_uname(
     'res' => [],
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1567,8 +1568,8 @@ def get_uptime(
     'res' => {'uptime' => nil, 'idle' => nil},
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1621,8 +1622,8 @@ def get_vmstat(
     'res' => {},
     'res_save' => nil
   }
-  m_name = "#{__method__}" # This function's (method) name ...
-  print_debug( 3, "#{m_name}" )
+  m_name = "#{__method__}"
+  print_debug( 1, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1706,23 +1707,26 @@ begin
 
   m5 = M5.new(cgi_debug) # Main data object ...
 
-  m5.print_debug( 5, "MAIN", "cgi_methods[#{cgi_methods}]" )
-  m5.print_debug( 5, "MAIN", "cgi_print[#{cgi_print}]" )
-  m5.print_debug( 5, "MAIN", "cgi_debug[#{cgi_debug}]" )
+  m_name = "MAIN"
+  m5.print_debug( 1, m_name )
+
+  m5.print_debug( 5, m_name, "cgi_methods[#{cgi_methods}]" )
+  m5.print_debug( 5, m_name, "cgi_print[#{cgi_print}]" )
+  m5.print_debug( 5, m_name, "cgi_debug[#{cgi_debug}]" )
 
   # List of valid methods ...
   m5_prop = %w( pid node_name init_time facts settings )
   m_valid = m5_prop + m5.info_methods
 
-  m5.print_debug( 5, "MAIN", "m5_prop[#{m5_prop.inspect}]" )
-  m5.print_debug( 5, "MAIN", "Valid methods[#{m_valid.inspect}]" )
+  m5.print_debug( 5, m_name, "m5_prop[#{m5_prop.inspect}]" )
+  m5.print_debug( 5, m_name, "Valid methods[#{m_valid.inspect}]" )
 
   # Print out usage if required ...
   all_valid_methods = \
       m_valid \
     + m_valid.collect { |m| m.gsub(/^get_/,'') } \
     + [ 'all' ]
-  m5.print_debug( 5, "MAIN", "All valid methods[#{all_valid_methods.inspect}]" )
+  m5.print_debug( 5, m_name, "All valid methods[#{all_valid_methods.inspect}]" )
   if cgi_methods - [ 'help', 'usage' ] != cgi_methods or
      all_valid_methods - cgi_methods == all_valid_methods
     print_usage( script, m_valid, m5.settings )
@@ -1748,7 +1752,7 @@ begin
     next if not ENV.has_key?(m5_k)
     m5.settings[k] = ENV[m5_k] if ENV[m5_k] != ''
     m5.settings[k] = m5.settings[k].to_i if m5.settings_type_int.include?(k)
-    m5.print_debug( 5, "MAIN", "Override found for #{m5_k}[#{ENV[m5_k]}]" )
+    m5.print_debug( 5, m_name, "Override found for #{m5_k}[#{ENV[m5_k]}]" )
   }
 
   #
@@ -1784,7 +1788,7 @@ begin
   }.compact
   # Default to all if empty list or "all" ...
   m_list = m_valid if ( m_list.empty? or m_list.include?("all") )
-  m5.print_debug( 4, "MAIN", "Methods to exec[#{m_list.inspect}]" )
+  m5.print_debug( 4, m_name, "Methods to exec[#{m_list.inspect}]" )
 
   #
   # Exec methods ...
@@ -1818,10 +1822,10 @@ begin
   # --------------------------------------------------------------------
 
   rescue TimeoutError
-    puts "MAIN::FATAL::#{$!.to_s.strip} (ACTION_TIMEOUT=#{big_timeout}s)"
+    puts "#{m_name}::FATAL::#{$!.to_s.strip} (ACTION_TIMEOUT=#{big_timeout}s)"
 
   rescue
-    m5.log_error( "MAIN", [$!.to_s.strip] )
+    m5.log_error( m_name, [$!.to_s.strip] )
 
 end
 
