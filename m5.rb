@@ -272,7 +272,6 @@ def initialize(
     (
         ^_$
       | DISPLAY
-      | OLDPWD
       | XAUTHORITY
       | XDG_SESSION_COOKIE
     )
@@ -286,10 +285,9 @@ def initialize(
       | ^fs.quota.syncs
       | ^kernel.pty.nr
       | ^kernel.random.(boot_id|entropy_avail|uuid)
-      | \.netfilter.ip_conntrack_count
+      | \.netfilter.(ip|nf)_conntrack_count
       | \.random
-      | \.route.gc_timeout
-      | \.route.gc_interval
+      | \.route.gc_(interval|timeout)
     )
   }x
   regex_ignore_conf = '/etc/m5/regex_ignore.rb'

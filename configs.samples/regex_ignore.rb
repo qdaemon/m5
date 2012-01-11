@@ -42,11 +42,9 @@ $regex_ignore['get_sysctl_a'] = %r{
     | ^fs.quota.syncs
     | ^kernel.pty.nr
     | ^kernel.random.(boot_id|entropy_avail|uuid)
-    | \.netfilter.ip_conntrack_count
-    | \.netfilter.nf_conntrack_count
+    | \.netfilter.(ip|nf)_conntrack_count
     | \.random
-    | \.route.gc_timeout
-    | \.route.gc_interval
+    | \.route.gc_(interval|timeout)
   )
 }x
 
