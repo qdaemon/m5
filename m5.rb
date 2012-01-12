@@ -54,12 +54,23 @@
 #   vmstat
 #
 # + DEBUG level guidelines:
-#   - 0: No DEBUG
-#   - 1: In which function
+#   - 0: No debug print
+#   - 1: Config files overrides
+#   - 2: MAIN variables
+#   - 3: In which method
+#   - 4: Method ARGS
+#   - 5: Misc notifications
+#   - 6: DATUM; i.e., data from command exec'ed
+#   - M5_STRICT_DEBUG_LEVEL environment variable:  Used to tell debug printing
+#     to only print that which is set to the specific level.  Otherwise, the
+#     debug level number is a minimum indicator; i.e., absolute vs minimum.
 #
 
 # -----------------------------------
 # FUNCTION:  Print out in standard debug format.
+# Note the M5_STRICT_DEBUG_LEVEL environment variable setting.  If set to
+#   anything but 0, debug printing will only print that which is set specific
+#   to the debug level in question.
 # -----------------------------------
 def dbg_print(
   dbg_lv,
@@ -67,7 +78,14 @@ def dbg_print(
   method,
   message=nil
 )
-  if dbg_lv >= min_lv
+  strict_level = false
+  strict_level = if ENV.has_key?('M5_STRICT_DEBUG_LEVEL')
+    true if ENV['M5_STRICT_DEBUG_LEVEL'].to_i != 0
+  end
+  do_print = false
+  do_print = true if dbg_lv >= min_lv and not strict_level
+  do_print = true if dbg_lv == min_lv and strict_level
+  if do_print
     msg = "DEBUG#{min_lv}::method[#{method}]"
     msg = "#{msg},#{message}" if not ( message.nil? or message.strip == '' )
     puts msg
@@ -155,7 +173,8 @@ def initialize(
   end
 
   m_name = "#{__method__}"
-  dbg_print( debug_level, 1, m_name )
+  dbg_print( debug_level, 3, m_name )
+  dbg_print( debug_level, 4, m_name, "ARGS:debug_level=#{debug_level.inspect}" )
 
   require 'socket'
   require 'timeout'
@@ -204,7 +223,7 @@ def initialize(
   if ENV.has_key?('M5_FACTS')
     facts_conf = ENV['M5_FACTS'] if ENV['M5_FACTS'].strip != ''
   end
-  dbg_print( debug_level, 4, m_name, "Facts file[#{facts_conf}]" )
+  dbg_print( debug_level, 1, m_name, "FILE:Facts[#{facts_conf}]" )
   facts_re = Regexp.compile('^FACT:(.*):(.*)$')
   File.open(facts_conf, 'r').each_line { |l|
     m = facts_re.match(l.strip)
@@ -214,7 +233,7 @@ def initialize(
     f, fv = [ k.gsub('COLON',':'), v.gsub('COLON',':') ]
     @facts[f] = fv
     ENV[f] = fv
-    dbg_print( debug_level, 5, m_name, "Fact[#{f}=#{fv}]" )
+    dbg_print( debug_level, 1, m_name, "FACT[#{f}=#{fv.inspect}]" )
   } if FileTest.readable?(facts_conf)
 
   # Setting types is used in converting ENV overrides to proper type ...
@@ -242,7 +261,7 @@ def initialize(
   if ENV.has_key?('M5_SETTINGS')
     settings_conf = ENV['M5_SETTINGS'] if ENV['M5_SETTINGS'].strip != ''
   end
-  dbg_print( debug_level, 4, m_name, "Settings file[#{settings_conf}]" )
+  dbg_print( debug_level, 1, m_name, "FILE:Settings[#{settings_conf}]" )
   settings_re = Regexp.compile('^SETTING:(.*):(.*)$')
   File.open(settings_conf, 'r').each_line { |l|
     m = settings_re.match(l.strip)
@@ -252,7 +271,7 @@ def initialize(
     s, sv = [ k.gsub('COLON',':'), v.gsub('COLON',':') ]
     sv = sv.to_i if @settings_type_int.include?(s)
     @settings[s] = sv
-    dbg_print( debug_level, 5, m_name, "Setting[#{s}=#{sv}]" )
+    dbg_print( debug_level, 1, m_name, "SETTING[#{s}=#{sv.inspect}]" )
   } if FileTest.readable?(settings_conf)
 
   # Regular expressions used in ignoring certain data retreived by methods.
@@ -296,7 +315,7 @@ def initialize(
     regex_ignore_conf = ENV['M5_REGEX_IGNORE'] \
       if ENV['M5_REGEX_IGNORE'].strip != ''
   end
-  dbg_print(debug_level, 4, m_name, "Regex Ignore file[#{regex_ignore_conf}]")
+  dbg_print( debug_level, 1, m_name, "FILE:Regex Ignore[#{regex_ignore_conf}]" )
   if FileTest.readable?(regex_ignore_conf)
     load regex_ignore_conf
     @regex_ignore.keys.each { |k|
@@ -305,6 +324,7 @@ def initialize(
   end
   @info_methods.each { |m|
     @regex_ignore[m] = /^ThingThatShouldNeverMatch$/ if @regex_ignore[m].nil?
+    dbg_print( debug_level, 1, m_name, "REGEX[#{m}=#{@regex_ignore[m].inspect}]" )
   }  # Make sure regex_ignore is never nil ...
 
   # Raw data ...
@@ -346,7 +366,7 @@ end
 #end
 def time_now
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
   return Time.new.strftime(@time_fmt)
 end
 
@@ -359,14 +379,17 @@ def log_error(
   log_file=@settings['ERRLOG']
 )
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:tag=#{tag.inspect}" )
+  print_debug( 4, m_name, "ARGS:data=#{data.inspect}" )
+  print_debug( 4, m_name, "ARGS:log_file=#{log_file.inspect}" )
   begin
     tag = "#{tag}-#{(0..8).map{ charset.to_a[rand(charset.size)] }.join}"
     log = File.open(log_file, 'a+')
     data.each { |l|
       e_msg = "#{time_now}::#{tag}::#{l}"
       log.puts e_msg
-      print_debug( 6, "#{m_name}", e_msg )
+      print_debug( 5, m_name, e_msg )
     }
     rescue
       puts "FATAL/#{m_name}::#{tag}::#{$!.to_s.strip}"
@@ -382,7 +405,8 @@ def time_since(
   dtg
 )
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:dtg=#{dtg.inspect}" )
   return begin
     sprintf("%0.6f microsec", Time.new - dtg)
     rescue
@@ -404,7 +428,9 @@ def map_k_to_v(
 )
   rtn = {}
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:list_k=#{list_k.inspect}" )
+  print_debug( 4, m_name, "ARGS:list_v=#{list_v.inspect}" )
   begin
     if list_k.length == list_v.length
       count = 0 ; list_k.each { |k| rtn[k] = list_v[count] ; count += 1 }
@@ -429,14 +455,17 @@ def file_diff(
 )
   rtn = []
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:tag=#{tag.inspect}" )
+  print_debug( 4, m_name, "ARGS:file_new=#{file_new.inspect}" )
+  print_debug( 4, m_name, "ARGS:file_old=#{file_old.inspect}" )
   begin
     tag = "#{tag}-#{(0..8).map{ charset.to_a[rand(charset.size)] }.join}"
     IO.popen("diff #{file_new} #{file_old} 2>/dev/null").each_line { |l|
       rtn << l.strip
     }
     if not rtn.empty? # Write out diffs if any ...
-      print_debug( 6, "#{m_name}", "Diff found [#{tag}]" )
+      print_debug( 5, m_name, "Diff found [#{tag}]" )
       diff_log = File.open( @settings['DIFFLOG'], 'a+' )
       rtn.each { |l| diff_log.puts "#{time_now}::#{tag}::#{l}" }
       diff_log.close
@@ -472,7 +501,10 @@ def save_last_current(
     }
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:method_name=#{method_name.inspect}" )
+  print_debug( 4, m_name, "ARGS:data=#{data.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     # Only save if there is something to save ...
     if data.length > 0
@@ -508,7 +540,7 @@ def print_datum(
   out_type
 )
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
   begin
     pre = @settings['DATUM_DELIM']
     print "Content-type: text/plain\n\n"
@@ -548,14 +580,16 @@ def get_cpuinfo(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/cpuinfo 2>/dev/null').each_line { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         if not l == ''
@@ -608,7 +642,9 @@ def get_dmidecode(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -620,14 +656,14 @@ def get_dmidecode(
       @raw_data[m_name] = []
       IO.popen('dmidecode 2>&1').each_line { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         break if lines_gotten > 10
         if /^System Information/.match(l)
             found = true
             start_capture = true
-            print_debug( 6, "#{m_name}", "Start capture" )
+            print_debug( 5, m_name, "Start capture" )
             next
         elsif /^Handle /.match(l)
             break if found and start_capture
@@ -670,13 +706,15 @@ def get_env(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
       @raw_data[m_name] = []
       ENV.each { |k,v|
-        print_debug( 6, "#{m_name}", "ENV[#{k}=#{v}]" )
+        print_debug( 6, m_name, "DATUM[#{k}=#{v}]" )
         next if @regex_ignore[m_name].match(k)
         rtn['res'][k] = v
         @raw_data[m_name] << "#{k}=#{v}"
@@ -752,7 +790,9 @@ def get_iostat(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -764,7 +804,7 @@ def get_iostat(
       @raw_data[m_name] = []
       IO.popen('iostat -x 1 2 2>&1').each_line { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         set_found += 1 if /^avg-cpu:/.match(l)
@@ -833,18 +873,20 @@ def get_ip_bindings(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('ip address show 2>&1').each_line { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         if /\binet\b/.match(l)
-          print_debug( 6, "#{m_name}", "Line matched!" )
+          print_debug( 5, m_name, "Line matched!" )
           l_arr = l.split(/\s+/)
           ip_nic = l_arr[-1]
           ip_addr = l_arr[1]
@@ -891,18 +933,20 @@ def get_loadavg(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/loadavg 2>/dev/null').each_line { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         if /^[0-9]+/.match(l)
-          print_debug( 6, "#{m_name}", "Line matched!" )
+          print_debug( 5, m_name, "Line matched!" )
           rtn['res']['m1'], rtn['res']['m5'], rtn['res']['m15'],
             dont_care, dont_care = l.split(/\s+/)
           break
@@ -949,14 +993,14 @@ def get_meminfo(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/meminfo 2>/dev/null').each_line { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         if not l == ''
@@ -1036,7 +1080,9 @@ def get_netstat_i(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1047,14 +1093,14 @@ def get_netstat_i(
       @raw_data[m_name] = []
       IO.popen('netstat -i 2>&1').each_line { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         if not l == ''
           if /^Iface\b/.match(l)
             start_cptr = true
             item_iface = l.split(/\s+/).slice(1..-1) # Iface keys list ...
-            print_debug( 6, "#{m_name}", "Iface keys[#{item_iface.inspect}]" )
+            print_debug( 5, m_name, "Iface keys[#{item_iface.inspect}]" )
           elsif start_cptr
             next if /no stat/i.match(l)
             la = l.split(/\s+/)
@@ -1122,7 +1168,9 @@ def get_netstat_pant(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1130,7 +1178,7 @@ def get_netstat_pant(
       # Doing count for everyone else but LISTEN ...
       IO.popen('netstat -pant 2>&1').each_line { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         if /^tcp\s+.*$/.match(l)
@@ -1211,7 +1259,9 @@ def get_netstat_rn(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1222,7 +1272,7 @@ def get_netstat_rn(
       @raw_data[m_name] = []
       IO.popen('netstat -rn 2>&1').each_line { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         if not l == ''
@@ -1267,7 +1317,9 @@ def get_os_release(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1278,11 +1330,11 @@ def get_os_release(
         /etc/lsb-release
       ).each { |f|
         if FileTest.exist?(f)
-          print_debug( 5, "#{m_name}", "File[#{f}]" )
+          print_debug( 5, m_name, "Release File[#{f}]" )
           @raw_data[m_name] = []
           rtn['res'] = File.open(f, 'r').readlines.map { |l_raw|
             l = l_raw.strip
-            print_debug( 6, "#{m_name}", "Line[#{l}]" )
+            print_debug( 6, m_name, "DATUM[#{l}]" )
             next if @regex_ignore[m_name].match(l)
             @raw_data[m_name] << l_raw
             ( l == '' ? nil : l )
@@ -1365,7 +1417,9 @@ def get_processes(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1374,7 +1428,7 @@ def get_processes(
       # Ignore first line ...
       IO.popen("#{p} 2>&1").readlines.slice(1..-1).each { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         i = l.split(/\s+/)
@@ -1440,7 +1494,7 @@ def get_processes(
             if not rtn['res']['ppid'].has_key?(i_pid)
           rtn['res']['ppid'][i_ppid] << i_pid
         else
-          print_debug( 6, "#{m_name}", "Ignoring[#{i.inspect}]" )
+          print_debug( 5, m_name, "Ignoring[#{i.inspect}]" )
         end
       }
     end
@@ -1474,14 +1528,16 @@ def get_sysctl_a(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('sysctl -a 2>/dev/null | grep = | sort').each_line { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         if not l == '' and /=/.match(l)
@@ -1524,14 +1580,14 @@ def get_uname(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
   begin
     time_start = Time.new
     timeout( to_sec ) do
       @raw_data[m_name] = []
       rtn['res'] = IO.popen('uname -snrvm 2>&1').readlines.map { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         ( l == '' ? nil : l )
@@ -1569,18 +1625,20 @@ def get_uptime(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/uptime 2>/dev/null').each_line { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         if /^[0-9]+/.match(l)
-          print_debug( 6, "#{m_name}", "Line matched!" )
+          print_debug( 5, m_name, "Line matched!" )
           upt, idl = l.split(/\s+/)
           rtn['res']['uptime'] = upt.to_i
           rtn['res']['idle'] = idl.to_i
@@ -1623,14 +1681,16 @@ def get_vmstat(
     'res_save' => nil
   }
   m_name = "#{__method__}"
-  print_debug( 1, m_name )
+  print_debug( 3, m_name )
+  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
+  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
   begin
     time_start = Time.new
     timeout( to_sec ) do
       @raw_data[m_name] = []
       IO.popen('cat /proc/vmstat 2>/dev/null').each_line { |l_raw|
         l = l_raw.strip
-        print_debug( 6, "#{m_name}", "Line[#{l}]" )
+        print_debug( 6, m_name, "DATUM[#{l}]" )
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         if not l == ''
@@ -1708,25 +1768,25 @@ begin
   m5 = M5.new(cgi_debug) # Main data object ...
 
   m_name = "MAIN"
-  m5.print_debug( 1, m_name )
+  m5.print_debug( 3, m_name )
 
-  m5.print_debug( 5, m_name, "cgi_methods[#{cgi_methods}]" )
-  m5.print_debug( 5, m_name, "cgi_print[#{cgi_print}]" )
-  m5.print_debug( 5, m_name, "cgi_debug[#{cgi_debug}]" )
+  m5.print_debug( 2, m_name, "cgi_methods[#{cgi_methods}]" )
+  m5.print_debug( 2, m_name, "cgi_print[#{cgi_print}]" )
+  m5.print_debug( 2, m_name, "cgi_debug[#{cgi_debug}]" )
 
   # List of valid methods ...
   m5_prop = %w( pid node_name init_time facts settings )
   m_valid = m5_prop + m5.info_methods
 
-  m5.print_debug( 5, m_name, "m5_prop[#{m5_prop.inspect}]" )
-  m5.print_debug( 5, m_name, "Valid methods[#{m_valid.inspect}]" )
+  m5.print_debug( 2, m_name, "m5_prop[#{m5_prop.inspect}]" )
+  m5.print_debug( 2, m_name, "Valid methods[#{m_valid.inspect}]" )
 
   # Print out usage if required ...
   all_valid_methods = \
       m_valid \
     + m_valid.collect { |m| m.gsub(/^get_/,'') } \
     + [ 'all' ]
-  m5.print_debug( 5, m_name, "All valid methods[#{all_valid_methods.inspect}]" )
+  m5.print_debug( 2, m_name, "All valid methods[#{all_valid_methods.inspect}]" )
   if cgi_methods - [ 'help', 'usage' ] != cgi_methods or
      all_valid_methods - cgi_methods == all_valid_methods
     print_usage( script, m_valid, m5.settings )
@@ -1752,7 +1812,7 @@ begin
     next if not ENV.has_key?(m5_k)
     m5.settings[k] = ENV[m5_k] if ENV[m5_k] != ''
     m5.settings[k] = m5.settings[k].to_i if m5.settings_type_int.include?(k)
-    m5.print_debug( 5, m_name, "Override found for #{m5_k}[#{ENV[m5_k]}]" )
+    m5.print_debug( 2, m_name, "Override found for #{m5_k}[#{ENV[m5_k]}]" )
   }
 
   #
@@ -1788,7 +1848,7 @@ begin
   }.compact
   # Default to all if empty list or "all" ...
   m_list = m_valid if ( m_list.empty? or m_list.include?("all") )
-  m5.print_debug( 4, m_name, "Methods to exec[#{m_list.inspect}]" )
+  m5.print_debug( 2, m_name, "Methods to exec[#{m_list.inspect}]" )
 
   #
   # Exec methods ...
