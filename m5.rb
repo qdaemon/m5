@@ -53,18 +53,6 @@
 #   uptime
 #   vmstat
 #
-# + DEBUG level guidelines:
-#   - 0: No debug print
-#   - 1: Config files overrides
-#   - 2: MAIN variables
-#   - 3: In which method
-#   - 4: Method ARGS
-#   - 5: Misc notifications
-#   - 6: DATUM; i.e., data from command exec'ed
-#   - M5_STRICT_DEBUG_LEVEL environment variable:  Used to tell debug printing
-#     to only print that which is set to the specific level.  Otherwise, the
-#     debug level number is a minimum indicator; i.e., absolute vs minimum.
-#
 
 # -----------------------------------
 # FUNCTION:  Print out in standard debug format.
@@ -76,7 +64,7 @@ def dbg_print(
   dbg_lv,
   min_lv,
   method,
-  message=nil
+  msg=nil
 )
   strict_level = false
   strict_level = if ENV.has_key?('M5_STRICT_DEBUG_LEVEL')
@@ -86,9 +74,9 @@ def dbg_print(
   do_print = true if dbg_lv >= min_lv and not strict_level
   do_print = true if dbg_lv == min_lv and strict_level
   if do_print
-    msg = "DEBUG#{min_lv}::method[#{method}]"
-    msg = "#{msg},#{message}" if not ( message.nil? or message.strip == '' )
-    puts msg
+    m = "DEBUG#{min_lv}::method[#{method}]"
+    m = "#{m},#{msg}" if not ( msg.nil? or msg.strip == '' )
+    puts m
   end
   return true
 end
@@ -128,6 +116,27 @@ def print_usage(
   Settings that can have environment or settings.conf overrides ...
 
 #{settings.keys.sort.map { |m| "    #{m}" }.join("\n")}
+
+DEBUG level guidelines:
+
+  0 - No debug print
+  1 - Config files overrides
+  2 - MAIN variables
+  3 - In which method
+  4 - Method ARGS
+  5 - Misc notifications
+  6 - DATUM; i.e., data from command exec'ed
+
+  M5_STRICT_DEBUG_LEVEL environment variable:  Used to tell debug printing
+    to only print that which is set to the specific level.  Otherwise, the
+    debug level number is a minimum indicator; i.e., absolute vs minimum.
+
+FACT and SETTING environment overrides:
+
+  Any fact and setting may be override, and fact and setting can be created on
+  the fly.  Create environment variable of the format M5_FACT_<fact>=<value>
+  or M5_SETTING_<setting>=<value> to override or add to existing facts and
+  settings.
 
 END_OF_USAGE
   return true
@@ -213,15 +222,18 @@ def initialize(
     get_vmstat
   )
 
-  # Facts:
+  #
+  # FACTS
+  #
   #   * Reserve for customized "anything" that anyone wants returned.
   #   * Default config file for facts is /etc/m5/facts.conf.  Location can be
   #     set with enviroment variable M5_FACTS.
   #   * Set in the environment (ENV).  Override ENV settings.
+  #
   @facts = {}
   facts_conf = '/etc/m5/facts.conf'
   if ENV.has_key?('M5_FACTS')
-    facts_conf = ENV['M5_FACTS'] if ENV['M5_FACTS'].strip != ''
+    facts_conf = ENV['M5_FACTS'] if not ENV['M5_FACTS'].strip.empty?
   end
   dbg_print( debug_level, 1, m_name, "FILE:Facts[#{facts_conf}]" )
   facts_re = Regexp.compile('^FACT:(.*):(.*)$')
@@ -235,18 +247,26 @@ def initialize(
     ENV[f] = fv
     dbg_print( debug_level, 1, m_name, "FACT[#{f}=#{fv.inspect}]" )
   } if FileTest.readable?(facts_conf)
+  # Environment variable override if exist ...
+  m5_fact_re = Regexp.compile('^M5_FACT_')
+  ENV.each { |k,v|
+    if m5_fact_re.match(k)
+      f_k = k.gsub(/^M5_FACT_/,'')
+      if not f_k.strip.empty?
+        @facts[f_k] = v if not f_k.strip.empty?
+        dbg_print( debug_level, 2, m_name, "FACT:EnvOvr[#{f_k}=#{v}]" )
+      end
+    end
+  }
 
-  # Setting types is used in converting ENV overrides to proper type ...
-  @settings_type_int = %w(
-    ACTION_TIMEOUT
-    DEBUG
-    MAX_THREADS
-  )
-
+  #
+  # SETTINGS:
+  #
   # Some reasonable settings.  Any may be override with ENV of the same name
   # that begins with "M5_<setting>".  Default config file (for override) is
   # /etc/m5/settings.conf.  Location can be set with environment variable
   # M5_SETTINGS ...
+  #
   @settings = {
     'ACTION_TIMEOUT'   => 10,                 # Max time to run any action.
     'DATUM_DELIM'      => 'DATUM:',           # Delimiter for data print out.
@@ -257,9 +277,15 @@ def initialize(
     'MAX_THREADS'      => 4,                  # Max number of threads.
     'WORKDIR'          => '/var/m5',          # All temp and persist data.
   }
+  # Setting types is used in converting ENV overrides to proper type ...
+  @settings_type_int = %w(
+    ACTION_TIMEOUT
+    DEBUG
+    MAX_THREADS
+  )
   settings_conf = '/etc/m5/settings.conf'
   if ENV.has_key?('M5_SETTINGS')
-    settings_conf = ENV['M5_SETTINGS'] if ENV['M5_SETTINGS'].strip != ''
+    settings_conf = ENV['M5_SETTINGS'] if not ENV['M5_SETTINGS'].strip.empty?
   end
   dbg_print( debug_level, 1, m_name, "FILE:Settings[#{settings_conf}]" )
   settings_re = Regexp.compile('^SETTING:(.*):(.*)$')
@@ -273,7 +299,22 @@ def initialize(
     @settings[s] = sv
     dbg_print( debug_level, 1, m_name, "SETTING[#{s}=#{sv.inspect}]" )
   } if FileTest.readable?(settings_conf)
+  # Environment variable override if exist ...
+  m5_setting_re = Regexp.compile('^M5_SETTING_')
+  ENV.each { |k,v|
+    if m5_setting_re.match(k)
+      s_k = k.gsub(/^M5_SETTING_/,'')
+      if not s_k.strip.empty?
+        @settings[s_k] = v
+        @settings[s_k] = v.to_i if @settings_type_int.include?(s_k)
+        dbg_print( debug_level, 2, m_name, "SETTING:EnvOvr[#{s_k}=#{v}]" )
+      end
+    end
+  }
 
+  #
+  # REGEX_IGNORE:
+  #
   # Regular expressions used in ignoring certain data retreived by methods.
   # Some reasonable settings.  Any may be override with ENV of the same name
   # that begins with "M5_<regex_ignore>".  Default config file (for override)
@@ -313,7 +354,7 @@ def initialize(
   regex_ignore_conf = '/etc/m5/regex_ignore.rb'
   if ENV.has_key?('M5_REGEX_IGNORE')
     regex_ignore_conf = ENV['M5_REGEX_IGNORE'] \
-      if ENV['M5_REGEX_IGNORE'].strip != ''
+      if not ENV['M5_REGEX_IGNORE'].strip.empty?
   end
   dbg_print( debug_level, 1, m_name, "FILE:Regex Ignore[#{regex_ignore_conf}]" )
   if FileTest.readable?(regex_ignore_conf)
@@ -342,13 +383,20 @@ end
 # -----------------------------------
 # FUNCTION:  Print out in standard debug format.  Use out of class method
 #            dbg_print.
+# Note that it is strongly recommended that if you are doing debug printing,
+#   make sure to set thread to 1 as ordering in print output cannot be
+#   guarantee with threads greater than 1.
 # -----------------------------------
 def print_debug(
   min_level,
   method,
-  message=nil
+  msg=nil
 )
-  dbg_print( @settings['DEBUG'], min_level, method, message )
+  if msg.class == Array
+    msg.each { |m| dbg_print( @settings['DEBUG'], min_level, method, m ) }
+  else
+    dbg_print( @settings['DEBUG'], min_level, method, msg )
+  end
 end
 
 ## -----------------------------------
@@ -380,9 +428,7 @@ def log_error(
 )
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:tag=#{tag.inspect}" )
-  print_debug( 4, m_name, "ARGS:data=#{data.inspect}" )
-  print_debug( 4, m_name, "ARGS:log_file=#{log_file.inspect}" )
+  print_debug( 4, m_name, %w( tag data log_file ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     tag = "#{tag}-#{(0..8).map{ charset.to_a[rand(charset.size)] }.join}"
     log = File.open(log_file, 'a+')
@@ -406,7 +452,7 @@ def time_since(
 )
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:dtg=#{dtg.inspect}" )
+  print_debug( 4, m_name, %w( dtg ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   return begin
     sprintf("%0.6f microsec", Time.new - dtg)
     rescue
@@ -429,8 +475,7 @@ def map_k_to_v(
   rtn = {}
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:list_k=#{list_k.inspect}" )
-  print_debug( 4, m_name, "ARGS:list_v=#{list_v.inspect}" )
+  print_debug( 4, m_name, %w( list_k list_v ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     if list_k.length == list_v.length
       count = 0 ; list_k.each { |k| rtn[k] = list_v[count] ; count += 1 }
@@ -456,9 +501,7 @@ def file_diff(
   rtn = []
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:tag=#{tag.inspect}" )
-  print_debug( 4, m_name, "ARGS:file_new=#{file_new.inspect}" )
-  print_debug( 4, m_name, "ARGS:file_old=#{file_old.inspect}" )
+  print_debug( 4, m_name, %w( tag file_new file_old ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     tag = "#{tag}-#{(0..8).map{ charset.to_a[rand(charset.size)] }.join}"
     IO.popen("diff #{file_new} #{file_old} 2>/dev/null").each_line { |l|
@@ -502,9 +545,7 @@ def save_last_current(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:method_name=#{method_name.inspect}" )
-  print_debug( 4, m_name, "ARGS:data=#{data.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( method_name data do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     # Only save if there is something to save ...
     if data.length > 0
@@ -541,6 +582,7 @@ def print_datum(
 )
   m_name = "#{__method__}"
   print_debug( 3, m_name )
+  print_debug( 4, m_name, %w( data_out data_raw out_type ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     pre = @settings['DATUM_DELIM']
     print "Content-type: text/plain\n\n"
@@ -581,8 +623,7 @@ def get_cpuinfo(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -643,8 +684,7 @@ def get_dmidecode(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -707,8 +747,7 @@ def get_env(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -791,8 +830,7 @@ def get_iostat(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -874,8 +912,7 @@ def get_ip_bindings(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -934,8 +971,7 @@ def get_loadavg(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -994,6 +1030,7 @@ def get_meminfo(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1081,8 +1118,7 @@ def get_netstat_i(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1169,8 +1205,7 @@ def get_netstat_pant(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1260,8 +1295,7 @@ def get_netstat_rn(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1318,8 +1352,7 @@ def get_os_release(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1418,8 +1451,7 @@ def get_processes(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1529,8 +1561,7 @@ def get_sysctl_a(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1581,6 +1612,7 @@ def get_uname(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1626,8 +1658,7 @@ def get_uptime(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1682,8 +1713,7 @@ def get_vmstat(
   }
   m_name = "#{__method__}"
   print_debug( 3, m_name )
-  print_debug( 4, m_name, "ARGS:to_sec=#{to_sec.inspect}" )
-  print_debug( 4, m_name, "ARGS:do_diff=#{do_diff.inspect}" )
+  print_debug( 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     time_start = Time.new
     timeout( to_sec ) do
@@ -1802,18 +1832,6 @@ begin
     print m_valid.sort.collect { |m| "    #{m}" }.join("\n") + "\n\n"
     exit(1)
   end
-
-  #
-  # Look for setting's ENV overrides ...
-  #
-
-  m5.settings.keys.each { |k|
-    m5_k = "M5_#{k}"
-    next if not ENV.has_key?(m5_k)
-    m5.settings[k] = ENV[m5_k] if ENV[m5_k] != ''
-    m5.settings[k] = m5.settings[k].to_i if m5.settings_type_int.include?(k)
-    m5.print_debug( 2, m_name, "Override found for #{m5_k}[#{ENV[m5_k]}]" )
-  }
 
   #
   # Ensure WORKDIR exist.  If not create it ...
