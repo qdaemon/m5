@@ -129,6 +129,8 @@ def print_usage(
 
 DEBUG level guidelines:
 
+  NOTE:  If debug is set to greater than 0, MAX_THREADS will be set to 1!
+
   0 - No debug print
   1 - Config files overrides
   2 - MAIN variables
@@ -391,6 +393,9 @@ def initialize(
   # Standard time format:  F = %Y-%m-%d (the ISO 8601 date format),
   #   T = 24-hour (%H:%M:%S) ...
   @time_fmt = '%F.%T%z'
+
+  # If debug set to greater than zero, then set MAX_THREADS to 1 ...
+  @settings['MAX_THREADS'] = 1 if @dbg_lv > 0
 
 end
 
