@@ -709,6 +709,7 @@ def get_df_il(
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         l_fs, l_inodes, l_iused, l_ifree, l_iusedp, l_mount = l.split(/\s+/)
+        l_iusedp = l_iusedp.gsub(/\%/,'')
         rtn['res'][l_mount] = {
           'Filesystem' => l_fs,
           'Inodes'     => l_inodes,
@@ -772,10 +773,15 @@ def get_df_klT(
         next if @regex_ignore[m_name].match(l)
         @raw_data[m_name] << l_raw
         l_fs, l_type, l_blks, l_used, l_avail, l_usep, l_mount = l.split(/\s+/)
+        l_usep = l_usep.gsub(/\%/,'')
+        l_blksM = ( l_blks.nil? ? 0 : l_blks.to_i / 1024 )
+        l_blksG = ( l_blks.nil? ? 0 : l_blks.to_i / ( 1024 * 1024 ) )
         rtn['res'][l_mount] = {
           'Filesystem' => l_fs,
           'Type'       => l_type,
           '1K-blocks'  => l_blks,
+          '1M-blocks'  => l_blksM,
+          '1G-blocks'  => l_blksG,
           'Used'       => l_used,
           'Available'  => l_avail,
           'Use%'       => l_usep
