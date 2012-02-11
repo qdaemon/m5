@@ -34,6 +34,8 @@
 #
 # + Dependent utilities:
 #   cat
+#   df -il
+#   df -klT
 #   diff
 #   dmidecode
 #   id -u
@@ -220,6 +222,8 @@ def initialize(
   # List of methods that pulls systems stats ...
   @info_methods = %w(
     get_cpuinfo
+    get_df_il
+    get_df_klT
     get_dmidecode
     get_env
     get_iostat
@@ -343,6 +347,18 @@ def initialize(
     (
         ^bogomips
       | ^cpu\ MHz
+    )
+  }x
+  @regex_ignore['get_df_il'] = %r{
+    (
+        ^$
+      | Filesystem
+    )
+  }x
+  @regex_ignore['get_df_klT'] = %r{
+    (
+        ^$
+      | Filesystem
     )
   }x
   @regex_ignore['get_env'] = %r{
@@ -642,6 +658,133 @@ def get_cpuinfo(
     rtn['msg'] = time_since( time_start )
     rescue TimeoutError
       e_msg = "(ACTION_TIMEOUT=#{to-sec}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
+    rescue
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
+  end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
+  return rtn
+end
+
+# ------------------------------
+# FUNCTION:  Get local FS inode info.
+# Return { key => val }
+# Expected 'df -il' output format:
+#  ...
+# Filesystem            Inodes   IUsed   IFree IUse% Mounted on
+# /dev/sda1            38813696  220699 38592997    1% /
+# udev                  504957     610  504347    1% /dev
+# tmpfs                 506935     573  506362    1% /run
+# none                  506935       1  506934    1% /run/lock
+# none                  506935       1  506934    1% /run/shm
+# /dev/sdb1            61054976  823106 60231870    2% /DATA
+# /dev/sdc1            91578368    2036 91576332    1% /USB2
+# /dev/sde1            91578368     218 91578150    1% /USB1
+# /dev/sdd1            91578368  303781 91274587    1% /USB3
+#  ...
+# ------------------------------
+def get_df_il(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=false
+)
+  rtn = {
+    'code' => eval(@moc),
+    'msg' => nil,
+    'res' => {},
+    'res_save' => nil
+  }
+  m_name = "#{__method__}"
+  dbg_print( @dbg_lv, 3, m_name )
+  dbg_print( @dbg_lv, 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
+  begin
+    time_start = Time.new
+    timeout( to_sec ) do
+      @raw_data[m_name] = []
+      # Pick up all lines but one starting with "Filesystem" or blank lines ...
+      IO.popen('df -il 2>&1').each_line { |l_raw|
+        l = l_raw.strip
+        dbg_print( @dbg_lv, 6, m_name, "DATUM[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
+        l_fs, l_inodes, l_iused, l_ifree, l_iusedp, l_mount = l.split(/\s+/)
+        rtn['res'][l_mount] = {
+          'Filesystem' => l_fs,
+          'Inodes'     => l_inodes,
+          'IUsed'      => l_iused,
+          'IFree'      => l_ifree,
+          'IUse%'      => l_iusedp
+        }
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
+      log_error( m_name, [rtn['msg']] )
+    rescue
+      rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip]
+      log_error( m_name, [rtn['msg']] )
+  end
+  rtn['res_save'] = save_last_current( m_name, @raw_data[m_name], do_diff )
+  return rtn
+end
+
+# ------------------------------
+# FUNCTION:  Get local FS space and fstype info.
+# Return { key => val }
+# Expected 'df -klT' output format:
+#  ...
+# Filesystem    Type   1K-blocks      Used Available Use% Mounted on
+# /dev/sda1     ext4   611194104   4733124 575414068   1% /
+# udev      devtmpfs     2019828        12   2019816   1% /dev
+# tmpfs        tmpfs      811100      7684    803416   1% /run
+# none         tmpfs        5120         0      5120   0% /run/lock
+# none         tmpfs     2027740         0   2027740   0% /run/shm
+# /dev/sdb1     ext4   961432904 470678608 441916256  52% /DATA
+# /dev/sdc1     ext4   1442145244 1151004388 217884056  85% /USB2
+# /dev/sde1     ext4   1442145244 721946392 646942052  53% /USB1
+# /dev/sdd1     ext4   1442145244 339715852 1029172592  25% /USB3
+#  ...
+# ------------------------------
+def get_df_klT(
+  to_sec=@settings['ACTION_TIMEOUT'],
+  do_diff=false
+)
+  rtn = {
+    'code' => eval(@moc),
+    'msg' => nil,
+    'res' => {},
+    'res_save' => nil
+  }
+  m_name = "#{__method__}"
+  dbg_print( @dbg_lv, 3, m_name )
+  dbg_print( @dbg_lv, 4, m_name, %w( to_sec do_diff ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
+  begin
+    time_start = Time.new
+    timeout( to_sec ) do
+      @raw_data[m_name] = []
+      # Pick up all lines but one starting with "Filesystem" or blank lines ...
+      IO.popen('df -klT 2>&1').each_line { |l_raw|
+        l = l_raw.strip
+        dbg_print( @dbg_lv, 6, m_name, "DATUM[#{l}]" )
+        next if @regex_ignore[m_name].match(l)
+        @raw_data[m_name] << l_raw
+        l_fs, l_type, l_blks, l_used, l_avail, l_usep, l_mount = l.split(/\s+/)
+        rtn['res'][l_mount] = {
+          'Filesystem' => l_fs,
+          'Type'       => l_type,
+          '1K-blocks'  => l_blks,
+          'Used'       => l_used,
+          'Available'  => l_avail,
+          'Use%'       => l_usep
+        }
+      }
+    end
+    rtn['msg'] = time_since( time_start )
+    rescue TimeoutError
+      e_msg = "(ACTION_TIMEOUT=#{to_sec}s)"
       rtn['code'], rtn['msg'] = [eval(@mec), $!.to_s.strip + "#{e_msg}"]
       log_error( m_name, [rtn['msg']] )
     rescue
