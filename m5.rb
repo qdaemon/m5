@@ -208,7 +208,6 @@ def initialize(
 
   # 3rdParty lib(s) ...
   $:.unshift File.join(File.dirname(__FILE__), '.', '3rdParty/lib/ruby/1.8')
-  require 'json'
 
   # "This" process' PID ...
   @pid = $$
@@ -597,6 +596,7 @@ def print_datum(
   dbg_print( @dbg_lv, 4, m_name, %w( data_out data_raw out_type ).collect { |a| "ARGS:#{a}=#{(eval a).inspect}" } )
   begin
     pre = @settings['DATUM_DELIM']
+    require 'json' if out_type.include?('json')
     print "Content-type: text/plain\n\n"
     puts "#{pre}:BEGIN:inspect", data_out.inspect, "#{pre}:END:inspect" \
       if out_type.include?('inspect')
