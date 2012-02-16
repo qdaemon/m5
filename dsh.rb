@@ -602,9 +602,11 @@ end
 # ----------
 def fn_parse_host_ssh( hostname )
 
-  host, ssh_port = hostname.split(/\|/)[0..1]
+  host, ssh_port, id_file, id_user = hostname.split(/\|/)[0..3]
   ssh_port = nil if /^\s*$/.match(ssh_port)
-  return [ host, ssh_port ]
+  id_file = nil if /^\s*$/.match(id_file)
+  id_user = nil if /^\s*$/.match(id_user)
+  return [ host, ssh_port, id_file, id_user ]
 
 end
 
@@ -946,8 +948,9 @@ def fn_do_ssh(
 
   rtn_errors = []  # Error messages if any to return ...
 
-  host, ssh_port = fn_parse_host_ssh( host )
+  host, ssh_port, id_file, id_user = fn_parse_host_ssh( host )
   this_port = ( ssh_port.nil? ? $configs['SSH_PORT'] : ssh_port.to_i )
+  this_user = id_user if not id_user.nil?
   shell = ''
 
   if filename.nil?
@@ -965,6 +968,7 @@ def fn_do_ssh(
   end
 
   this_cmd  = "ssh -x -p #{this_port}"
+  this_cmd  = "#{this_cmd} -i #{id_file}" if not id_file.nil?
   this_cmd  += " #{ssh_opt}"
   if $arg_echo
     this_cmd += " #{this_user}\@#{host} #{action}"
@@ -1043,7 +1047,7 @@ def fn_do_local( host, action, max_time )
 
   rtn_errors = []  # Error messages if any to return ...
 
-  host, ssh_port = fn_parse_host_ssh( host )
+  host, ssh_port, id_file, id_user = fn_parse_host_ssh( host )
 
   unless $arg_raw_actions
     this_cmd = "#{action.gsub(/__HOST__/, host)} 2>&1"
