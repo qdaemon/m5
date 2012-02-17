@@ -171,6 +171,12 @@ def initialize(
   debug_level=0
 )
 
+  begin
+  
+  # ----------
+  # BEGIN Block
+  # ----------
+
   # Debug level ...
   @dbg_lv = debug_level
 
@@ -202,6 +208,8 @@ def initialize(
   dbg_print( @dbg_lv, 3, m_name )
   dbg_print( @dbg_lv, 4, m_name, "ARGS:dbg_lv=#{@dbg_lv.inspect}" )
 
+  dbg_print( @dbg_lv, 5, m_name, "Loading libs" )
+
   require 'socket'
   require 'timeout'
   require 'yaml'
@@ -209,11 +217,17 @@ def initialize(
   # 3rdParty lib(s) ...
   $:.unshift File.join(File.dirname(__FILE__), '.', '3rdParty/lib/ruby/1.8')
 
+  dbg_print( @dbg_lv, 5, m_name, "Initializing variables - part 1" )
+
   # "This" process' PID ...
   @pid = $$
 
-  # "This" node name ...
-  @node_name = Socket.gethostbyname(Socket.gethostname)[0]
+  # "This" node name.  Set to 'localhost' if fail ...
+  begin
+    @node_name = Socket.gethostbyname(Socket.gethostname)[0]
+    rescue
+      @node_name = 'localhost'
+  end
 
   # "This" object's instantiation time ...
   @init_time = Time.new
@@ -239,6 +253,8 @@ def initialize(
     get_uptime
     get_vmstat
   )
+
+  dbg_print( @dbg_lv, 5, m_name, "Get FACTS" )
 
   #
   # FACTS
@@ -279,6 +295,8 @@ def initialize(
       end
     end
   }
+
+  dbg_print( @dbg_lv, 5, m_name, "Get SETTINGS" )
 
   #
   # SETTINGS:
@@ -330,6 +348,8 @@ def initialize(
       end
     end
   }
+
+  dbg_print( @dbg_lv, 5, m_name, "Set REGEX_IGNORE" )
 
   #
   # REGEX_IGNORE:
@@ -399,6 +419,8 @@ def initialize(
     dbg_print( @dbg_lv, 1, m_name, "REGEX[#{m}=#{@regex_ignore[m].inspect}]" )
   }  # Make sure regex_ignore is never nil ...
 
+  dbg_print( @dbg_lv, 5, m_name, "Initializing variables - part 2" )
+
   # Raw data ...
   @raw_data = {}
 
@@ -411,6 +433,14 @@ def initialize(
 
   # If debug set to greater than zero, then set MAX_THREADS to 1 ...
   @settings['MAX_THREADS'] = 1 if @dbg_lv > 0
+
+  # ----------
+  # End block
+  # ----------
+
+    rescue
+      puts "WARNING::method[#{__method__}],#{$!.to_s.strip}"
+  end
 
 end
 
@@ -1502,14 +1532,17 @@ def get_os_release(
     time_start = Time.new
     timeout( to_sec ) do
       # Supported (in order below):  Redhat, SuSE, Ubuntu ...
-      %w(
-        /etc/redhat-release
-        /etc/SuSE-release
-        /etc/lsb-release
-      ).each { |f|
+      {
+        '/etc/debian_version' => 'DEBIAN',
+        '/etc/lsb-release'    => 'UBUNTU',
+        '/etc/redhat-release' => 'REDHAT',
+        '/etc/SuSE-release'   => 'SUSE'
+      }.each { |f,distro|
         if FileTest.exist?(f)
           dbg_print( @dbg_lv, 5, m_name, "Release File[#{f}]" )
-          @raw_data[m_name] = []
+          file_data = "M5_FILE=#{f}"
+          distro_data = "M5_DISTRO=#{distro}"
+          @raw_data[m_name] = [ file_data, distro_data ]
           rtn['res'] = File.open(f, 'r').readlines.map { |l_raw|
             l = l_raw.strip
             dbg_print( @dbg_lv, 6, m_name, "DATUM[#{l}]" )
@@ -1517,6 +1550,8 @@ def get_os_release(
             @raw_data[m_name] << l_raw
             ( l == '' ? nil : l )
           }.compact
+          rtn['res'] << file_data
+          rtn['res'] << distro_data
           break
         end
       }
