@@ -1556,9 +1556,14 @@ if arg_numbers
 end
 
 #
-# Get host with longest name ...
+# Get host with longest name.  Need to remove leading <userid> before '@'
+#   and anything after '|'.  Hostname is located as follows ...
+#     <userid>@<hostname>|some|other|stuff
 #
-hosts_todo.each { |h| $max_host_ln = h.size if $max_host_ln < h.size }
+hosts_todo.each { |h|
+  tmp_h = h.split(/\@/)[1].split(/\|/)[0]
+  $max_host_ln = tmp_h.size if $max_host_ln < tmp_h.size
+}
 $max_host_ln = $max_host_ln - $host_filter.length
 
 # Allow last chance to change your mind (unless '-y' flag was used) ...
