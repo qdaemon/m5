@@ -1497,8 +1497,17 @@ end
 
 #
 # Applying "exceptions (-e)".  This needs to be applied last to hosts_todo!
+#   Because custom classes are delimited by pipe ('|'), we have to split
+#   and take first array index (0) to do the comparison; i.e., we only want
+#   to compare host.
 #
-hosts_todo = hosts_todo - get_hosts_list( arg_except, 0 )
+get_hosts_list( arg_except, 0 ).each { |h_except|
+  hosts_todo.each { |h_todo|
+    tmp_h_todo   = h_todo.split(/\@/)[1].split(/\|/)[0]
+    tmp_h_except = h_except.split(/\@/)[1]
+    hosts_todo.delete(h_todo) if tmp_h_todo == tmp_h_except
+  }
+}
 
 #
 # If display list of hosts only, do it then exit ...
