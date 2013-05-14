@@ -30,7 +30,8 @@
 #   SSH_USER - SSH user to use when using SSH mechanism.  Defaults to "root".
 #             Can be overriden by DSH_USER environment variable.
 #
-#   SSH_PORT - Port to use when using SSH mechanism. Defaults to 22.
+#   SSH_PORT - Port to use when using SSH mechanism. Defaults to 22.  If set
+#             to 0, then don't set port in ssh command.
 #
 #   DEFAULT_THREADS - Default number of threads to use (default to 1).  "-t"
 #             option is used to override.
@@ -949,7 +950,7 @@ def fn_do_ssh(
   rtn_errors = []  # Error messages if any to return ...
 
   host, ssh_port, id_file, id_user = fn_parse_host_ssh( host )
-  this_port = ( ssh_port.nil? ? $configs['SSH_PORT'] : ssh_port.to_i )
+  this_port = ( ssh_port.nil? ? $configs['SSH_PORT'] : ssh_port ).to_i
   this_user = id_user if not id_user.nil?
   shell = ''
 
@@ -967,25 +968,24 @@ def fn_do_ssh(
     end
   end
 
-  this_cmd  = "ssh -x -p #{this_port}"
+  this_cmd  = "ssh -x"
+  this_cmd  = "#{this_cmd} -p #{this_port}" if this_port != 0
   this_cmd  = "#{this_cmd} -i #{id_file}" if not id_file.nil?
-  this_cmd  += " #{ssh_opt}"
+  this_cmd += " #{ssh_opt}"
+  this_cmd += " #{this_user}\@#{host}"
   if $arg_echo
-    this_cmd += " #{this_user}\@#{host} #{action}"
+    this_cmd += " #{action}"
     print "\n    ECHO-SUB::#{this_cmd}"
     return rtn_errors
   else
     if filename.nil?
       if enhanced_mode
-        this_cmd += " #{this_user}\@#{host} " +
-                   "'#{shell}' 2>&1 << '##dsh##'\n#{action}\n##dsh##"
+        this_cmd += " '#{shell}' 2>&1 << '##dsh##'\n#{action}\n##dsh##"
       else
-        this_cmd += " #{this_user}\@#{host} " +
-                   "'#{action}' 2>&1"
+        this_cmd += " '#{action}' 2>&1"
       end
     else
-      this_cmd += " #{this_user}\@#{host} " +
-                 "'#{shell}' 2>&1 < #{filename}"
+      this_cmd += " '#{shell}' 2>&1 < #{filename}"
     end
 
     # DEBUG ...
@@ -1003,7 +1003,11 @@ def fn_do_ssh(
   time_test = Time.new.to_i  # Noting the start time ...
 
   # First check for connection possibilities ...
-  port_is_open = check_open_port( host, this_port )
+  port_is_open = if this_port == 0
+    [ true, "OK" ] # Assume true if port is ignored in command ...
+  else
+    check_open_port( host, this_port )
+  end
   if port_is_open[0]
     conn_good = true
   else
