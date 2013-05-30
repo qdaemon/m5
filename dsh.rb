@@ -31,7 +31,8 @@
 #             Can be overriden by DSH_USER environment variable.
 #
 #   SSH_PORT - Port to use when using SSH mechanism. Defaults to 22.  If set
-#             to 0, then don't set port in ssh command.
+#             to 0, then don't set port in ssh command; i.e., suppress (-p)
+#             option.
 #
 #   DEFAULT_THREADS - Default number of threads to use (default to 1).  "-t"
 #             option is used to override.
@@ -380,6 +381,18 @@ USAGE(S):  #{$script_name} <-h|--help>
 
                   Optional.  Execution timeout for actions.
                   Overrides ACTION_TIMEOUT.
+
+  --wrapper <text w/embedded __MSG__ placeholder>
+
+                  Optional.  Print out results will be text with any __MSG__
+                  placeholders replaced by actual output results. If __HOST__
+                  and/or __SHOST__ placeholders are used, those placeholders
+                  will likewise be replaced as well with hostname.
+
+                  __EXECTIME__ placeholder may be used to print out the time
+                  taken for this node to complete the exec.
+
+                  __LINEFEED__ placeholder may be used to print out linefeed.
 
   -y              Optional.  Don't ask for confirmation prior to executing.
                   Used when using this command in a scripted environment.
@@ -799,12 +812,23 @@ def summation_host( h, t, msg )
   if $suppress_ssh_newhostmsg
     msg = msg.gsub(/^Warning: Permanently added .* to the list of known hosts.*$/,'')
   end
+
+  # Munge results msg if wrapper enabled ...
+  if not $arg_wrapper.nil?
+    msg = $arg_wrapper.gsub(/__MSG__/, msg.strip)
+    msg = msg.gsub(/__HOST__/, h)
+    msg = msg.gsub(/__SHOST__/, h.split('.')[0])
+    msg = msg.gsub(/__EXECTIME__/, "#{t}s")
+    msg = msg.gsub(/__LINEFEED__/, "\n")
+  end
  
   Thread.critical = true
   if $arg_verbose
-    fn_print( $dline )
-    fn_print( "HOST [#{h}] (#{t}s)" )
-    fn_print( $dline )
+    if $arg_wrapper.nil?
+      fn_print( $dline )
+      fn_print( "HOST [#{h}] (#{t}s)" )
+      fn_print( $dline )
+    end
     fn_print( msg )
   elsif $arg_raw
     fn_print( msg.to_s )
@@ -1212,6 +1236,7 @@ $max_host_ln  = 0
 $max_class_ln = 0
 $max_line_ln  = 64    # Max characters to print on a given line ...
 $host_filter  = ''
+$arg_wrapper  = nil   # If not nil, wrap results with custom text ...
 
 $suppress_ssh_newhostmsg = false # Set true if "--ssh-knownhostsnull" used ...
 $enable_stricthostkeychk = false # Default is "-o StrictHostKeyChecking=no" ...
@@ -1280,6 +1305,7 @@ begin
     [                   "-y",   GetoptLong::NO_ARGUMENT       ],
     [ "--stats",                GetoptLong::NO_ARGUMENT       ],
     [ "--statistics",           GetoptLong::NO_ARGUMENT       ],
+    [ "--wrapper",              GetoptLong::REQUIRED_ARGUMENT ],
     [ "--help",         "-h",   GetoptLong::NO_ARGUMENT       ]
   )
   cmd_opts.each { |opt,arg|
@@ -1348,6 +1374,7 @@ begin
       when          /--statistics$|--stats$/
         fn_print_statistics()
         exit(0)
+      when           /--wrapper$/ then $arg_wrapper         = arg.to_s
       when          /--help$|-h$/
         fn_exception( "HELP", "Usage ...", 0, true )
       else
