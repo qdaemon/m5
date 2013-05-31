@@ -223,6 +223,11 @@ USAGE(S):  #{$script_name} <-h|--help>
                   to SSH.  Exclusive of '-l', '-a', and '-c' options.  This
                   option implies SSH '-T' flag (pseudo-tty disabled).
 
+  --filterscript <filename>
+
+                  Optional.  Execute script "filename" against each result
+                  before printout.
+
   -h | --help     Optional.  Display usage.
 
   --hush          Optional.  Not verbose and no ending summation.
@@ -813,13 +818,25 @@ def summation_host( h, t, msg )
     msg = msg.gsub(/^Warning: Permanently added .* to the list of known hosts.*$/,'')
   end
 
-  # Munge results msg if wrapper enabled ...
+  # Apply wrapper to results if enabled ...
   if not $arg_wrapper.nil?
     msg = $arg_wrapper.gsub(/__MSG__/, msg.strip)
     msg = msg.gsub(/__HOST__/, h)
     msg = msg.gsub(/__SHOST__/, h.split('.')[0])
     msg = msg.gsub(/__EXECTIME__/, "#{t}s")
     msg = msg.gsub(/__LINEFEED__/, "\n")
+  end
+ 
+  # Apply filter script to results if enabled ...
+  if not $arg_filter.nil?
+    this_cmd =<<EndOfCommand
+cat <<EndOfCat | #{$arg_filter}
+#{msg.strip}
+EndOfCat
+EndOfCommand
+    this_proc = IO.popen( this_cmd, 'r' )
+    msg = this_proc.readlines.join('')
+    this_proc.close()
   end
  
   Thread.critical = true
@@ -1237,6 +1254,7 @@ $max_class_ln = 0
 $max_line_ln  = 64    # Max characters to print on a given line ...
 $host_filter  = ''
 $arg_wrapper  = nil   # If not nil, wrap results with custom text ...
+$arg_filter   = nil   # If not nil, exec script against result ...
 
 $suppress_ssh_newhostmsg = false # Set true if "--ssh-knownhostsnull" used ...
 $enable_stricthostkeychk = false # Default is "-o StrictHostKeyChecking=no" ...
@@ -1306,6 +1324,7 @@ begin
     [ "--stats",                GetoptLong::NO_ARGUMENT       ],
     [ "--statistics",           GetoptLong::NO_ARGUMENT       ],
     [ "--wrapper",              GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--filterscript",         GetoptLong::REQUIRED_ARGUMENT ],
     [ "--help",         "-h",   GetoptLong::NO_ARGUMENT       ]
   )
   cmd_opts.each { |opt,arg|
@@ -1375,6 +1394,7 @@ begin
         fn_print_statistics()
         exit(0)
       when           /--wrapper$/ then $arg_wrapper         = arg.to_s
+      when      /--filterscript$/ then $arg_filter          = arg.to_s
       when          /--help$|-h$/
         fn_exception( "HELP", "Usage ...", 0, true )
       else
