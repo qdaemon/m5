@@ -370,6 +370,8 @@ USAGE(S):  #{$script_name} <-h|--help>
                   [ h2, h5 ].  Why would you do this?  Who knows ...
                   Note!  This will be applied before the --except flag.
 
+  --sort          Optional.  Print results sorted on servers (-s).
+
   -S | --sudo     Optional.  Adds 'sudo <shell>' to '-a' argument.
 
   -t | --threads <n>
@@ -493,11 +495,11 @@ def fn_show_class(class_filter='', host_filter='')
 
   # Get max class length ...
   $configs['CLASSES'].keys.each { |k|
-    $max_class_ln = k.size if $max_class_ln < k.size
+    $max_class_ln = k.length if $max_class_ln < k.length
   }
 
   $configs['CLASSES_EXTENDED'].keys.each { |k|
-    $max_class_ln = k.size if $max_class_ln < k.size
+    $max_class_ln = k.length if $max_class_ln < k.length
   }
 
   $max_line_ln = $max_line_ln - $max_class_ln
@@ -515,7 +517,7 @@ def fn_show_class(class_filter='', host_filter='')
       printf "%#{$max_class_ln}s [ ", k
       line_len = 0
       $configs['CLASSES'][k].sort.each do |i|
-        line_len = line_len + i.size + 1
+        line_len = line_len + i.length + 1
         if line_len > $max_line_ln
           print "\n#{' '*$max_class_ln}   "
           line_len = 0
@@ -534,7 +536,7 @@ def fn_show_class(class_filter='', host_filter='')
       line_len = 0
       $configs['CLASSES_EXTENDED'][k].each do |i|
         if i.match(host_filter)
-          line_len = line_len + i.size + 1
+          line_len = line_len + i.length + 1
           if line_len > $max_line_ln
             print "\n#{' '*$max_class_ln}    "
             line_len = 0
@@ -578,11 +580,11 @@ def fn_print_statistics
     extended_hosts += get_hosts_list(i, 0)
   }
 
-  generic_size  = generic_classes.uniq.size
-  extended_size = extended_classes.uniq.size
+  generic_size  = generic_classes.uniq.length
+  extended_size = extended_classes.uniq.length
 
-  generic_hosts_count  = generic_hosts.uniq.size
-  extended_hosts_count = extended_hosts.uniq.size
+  generic_hosts_count  = generic_hosts.uniq.length
+  extended_hosts_count = extended_hosts.uniq.length
 
   total_classes = generic_size + extended_size
   total_hosts   = generic_hosts_count + extended_hosts_count
@@ -655,10 +657,10 @@ def get_class_list( this_list, recurse_limit )
   end
   # Continue if OK on recursion limit ...
   rtn = []
-  return rtn if this_list.nil? or this_list.size == 0
+  return rtn if this_list.nil? or this_list.length == 0
   srv_list = this_list.split(/,/)
   # Only process one item at a time.  If more than one, then recurse ...
-  if srv_list.size > 1
+  if srv_list.length > 1
     srv_list.each { |item| rtn << get_class_list( item, recurse_limit ) }
   elsif $configs['CLASSES'].has_key?( this_list )
     rtn << this_list
@@ -693,13 +695,13 @@ def get_hosts_list( this_list, recurse_limit )
   end
   # Continue if OK on recursion limit ...
   rtn = []
-  return rtn if this_list.nil? or this_list.size == 0
+  return rtn if this_list.nil? or this_list.length == 0
   srv_list = []
   replace_comas(this_list).split(/,/).each { |i|
     srv_list += get_expanded_hostnames(i).to_a
   }
   # Only process one item at a time.  If more than one, then recurse ...
-  if srv_list.size > 1
+  if srv_list.length > 1
     srv_list.each { |item| rtn << get_hosts_list( item, recurse_limit ) }
   else
     this_user = "#{$configs['SSH_USER']}@"
@@ -838,29 +840,57 @@ EndOfCommand
     msg = this_proc.readlines.join('')
     this_proc.close()
   end
- 
-  Thread.critical = true
-  if $arg_verbose
-    if $arg_wrapper.nil?
-      fn_print( $dline )
-      fn_print( "HOST [#{h}] (#{t}s)" )
-      fn_print( $dline )
+
+  # If sort is enabled (--sort), then check stack to see if current host (h)
+  #   is up next or not (compare against top of stack).  If not, then don't
+  #   print ...
+  tmp_print_stack = []
+  $arg_sort_data[h] = { 't' => t, 'msg' => msg }
+  if $arg_sort
+    # Print stack should contain the current item if that server is at the
+    #   top of the stack.  Keep pulling from top of stack into print stack
+    #   as long as we have data for the server at the top of the stack ...
+    if h == $arg_sort_stack[0] 
+      tmp_print_stack.push(h)
+      $arg_sort_stack.shift
+      while $arg_sort_data.has_key?($arg_sort_stack[0])
+        tmp_print_stack.push($arg_sort_stack[0])
+        $arg_sort_stack.shift
+      end
     end
-    fn_print( msg )
-  elsif $arg_raw
-    fn_print( msg.to_s )
-  elsif $arg_raw_host
-    msg.to_s.split(/\n/).each { |m| fn_print( "#{h}::#{m}" ) }
-  elsif $arg_unique
-    # Gather but don't print.  We print once we have all data.  This is because
-    #   need to compare all output before we can print!
-    $host_output[h] = msg
   else
-    printf "%#{$max_host_ln}s::%s\n",
-      h,
-      msg.to_s.split(/\n/).join(' | ').gsub(/\s+/,' ')
+    # If not sort enabled, print stack should only contain the one current
+    #   item to print ...
+    tmp_print_stack.push(h)
   end
-  Thread.critical = false
+ 
+  while tmp_print_stack.length > 0
+    h   = tmp_print_stack.shift
+    t   = $arg_sort_data[h]['t']
+    msg = $arg_sort_data[h]['msg']
+    Thread.critical = true
+    if $arg_verbose
+      if $arg_wrapper.nil?
+        fn_print( $dline )
+        fn_print( "HOST [#{h}] (#{t}s)" )
+        fn_print( $dline )
+      end
+      fn_print( msg )
+    elsif $arg_raw
+      fn_print( msg.to_s )
+    elsif $arg_raw_host
+      msg.to_s.split(/\n/).each { |m| fn_print( "#{h}::#{m}" ) }
+    elsif $arg_unique
+      # Gather but don't print.  We print once we have all data.  (Need to
+      #   compare all output before we can print!)
+      $host_output[h] = msg
+    else
+      printf "%#{$max_host_ln}s::%s\n",
+        h,
+        msg.to_s.split(/\n/).join(' | ').gsub(/\s+/,' ')
+    end
+    Thread.critical = false
+  end
 
   return 0
 
@@ -888,7 +918,7 @@ def summation( action_timeout, num_t, duration, action, hosts, errors )
   fn_print( "Action:              #{action}" )
   fn_print( "Exec Default User:   #{$configs['SSH_USER']}" )
   counter = -1
-  hosts_affected = hosts.class == Array ? hosts.size : 1
+  hosts_affected = hosts.class == Array ? hosts.length : 1
   fn_print( "Host(s) Affected [#{hosts_affected}] and time in seconds ...\n" )
   fn_print( $dline )
   tmp_msg = []
@@ -902,10 +932,12 @@ def summation( action_timeout, num_t, duration, action, hosts, errors )
       counter = 0
     end
     this_host = host.downcase
+    # This next line needs to go before the trimming of this_host as node_times
+    #   will not match any after trimming!
+    tmp_msg << "#{sprintf "[%3d] ", ( $node_times[ this_host.split('@')[1] ] || 0 )}"
     if this_host.length > max_hostname
       this_host = "#{this_host[0..(max_hostname-2)]}"
     end
-    tmp_msg << "#{sprintf "[%3d] ", ( $node_times[ this_host.split('@')[1] ] || 0 )}"
     tmp_msg << "#{sprintf "%-#{max_hostname}s", this_host}"
     counter += 1
   }
@@ -1238,8 +1270,8 @@ $arg_normal_actions = false  # Normal mode of evaluation of action/command to ex
 $arg_raw_actions    = false  # Suppress evaluation of action/command to execute ...
 
 # Selecting only certain hosts in list ...
-arg_start   = 0
-arg_step    = 0
+arg_start = 0
+arg_step  = 0
 
 show_ending_summation = true
 
@@ -1255,6 +1287,11 @@ $max_line_ln  = 64    # Max characters to print on a given line ...
 $host_filter  = ''
 $arg_wrapper  = nil   # If not nil, wrap results with custom text ...
 $arg_filter   = nil   # If not nil, exec script against result ...
+
+# For sorting output if option set (--sort) ...
+$arg_sort       = false # Sort enabled (true) or not (false) ...
+$arg_sort_data  = {}    # Server to data ...
+$arg_sort_stack = []    # To track which server is next up ...
 
 $suppress_ssh_newhostmsg = false # Set true if "--ssh-knownhostsnull" used ...
 $enable_stricthostkeychk = false # Default is "-o StrictHostKeyChecking=no" ...
@@ -1316,6 +1353,7 @@ begin
     [ "--ssh-knownhostsnull",   GetoptLong::NO_ARGUMENT       ],
     [ "--ssh-stricthostkeychk", GetoptLong::NO_ARGUMENT       ],
     [ "--step",                 GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--sort",                 GetoptLong::NO_ARGUMENT       ],
     [ "--sudo",         "-S",   GetoptLong::NO_ARGUMENT       ],
     [ "--threads",      "-t",   GetoptLong::REQUIRED_ARGUMENT ],
     [ "--user",         "-u",   GetoptLong::REQUIRED_ARGUMENT ],
@@ -1385,6 +1423,7 @@ begin
         arg_start, arg_step = arg.to_s.split(',')
         arg_start = arg_start.to_i
         arg_step  = arg_step.to_i
+      when              /--sort$/ then $arg_sort            = true
       when          /--sudo$|-S$/ then arg_sudo             = true
       when       /--threads$|-t$/ then arg_threads          = arg.to_i
       when          /--user$|-u$/ then $configs['SSH_USER'] = arg.to_s
@@ -1589,11 +1628,11 @@ if arg_numbers
 
   tmp_class_list.each { |i|
     this_host_list  = get_hosts_list(i, 0)
-    class_list[i]   = this_host_list.size
+    class_list[i]   = this_host_list.length
     tmp_hosts_list += this_host_list
   }
 
-  line_len = tmp_class_list.max { |a,b| a.size <=> b.size }.size
+  line_len = tmp_class_list.max { |a,b| a.length <=> b.length }.length
 
   print "\n"
 
@@ -1601,7 +1640,7 @@ if arg_numbers
     printf("%-#{line_len}s   = %5d\n", k, class_list[k])
   }
 
-  print "\nTOTAL = #{tmp_hosts_list.uniq.size}\n"
+  print "\nTOTAL = #{tmp_hosts_list.uniq.length}\n"
 
   exit( 0 )
 end
@@ -1613,9 +1652,12 @@ end
 #
 hosts_todo.each { |h|
   tmp_h = h.split(/\@/)[1].split(/\|/)[0]
-  $max_host_ln = tmp_h.size if $max_host_ln < tmp_h.size
+  $max_host_ln = tmp_h.length if $max_host_ln < tmp_h.length
+  # Populate sort list in case we need to use it ...
+  $arg_sort_stack << tmp_h
 }
 $max_host_ln = $max_host_ln - $host_filter.length
+$arg_sort_stack.sort! if ( $arg_sort and $arg_sort_stack.length > 0 )
 
 # Allow last chance to change your mind (unless '-y' flag was used) ...
 if arg_confirm
