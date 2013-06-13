@@ -228,8 +228,10 @@ USAGE(S):  #{$script_name} <-h|--help>
 
   --filterscript <filename>
 
-                  Optional.  Execute script "filename" against each result
-                  before printout.
+                  Optional.  Execute script <filename> against each result
+                  before printout.  <filename> can be a command since the
+                  code just cat/pipes each output to <filename>.
+
 
   -h | --help     Optional.  Display usage.
 
