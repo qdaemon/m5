@@ -197,9 +197,12 @@ USAGE(S):  #{$script_name} <-h|--help>
 
                   In other words things like the following will work ...
 
-                    dsh.rb -s servers -a "dsh.rb -s servers -a 'echo __HOST__'"
+                    dsh.rb -s hosts -a "dsh.rb -s hosts -a 'echo __HOST__'"
 
                   Mutually exclusive from '-a' option.
+
+  --cmd-prefix    Optional.  Prefix all "ssh" calls with some command; e.g.,
+                  "tsocks ssh ...".
 
   -d | --display  Optional.  If used, all other options will be ignored except
                   the '-s' option.  This option will ask DSH to display all
@@ -219,7 +222,7 @@ USAGE(S):  #{$script_name} <-h|--help>
 
   -f | --file <name of script file>
 
-                  Optional.  Execute a script at the remote host.  Only applies
+                  Optional.  Execute a script at remote host.  Only applies
                   to SSH.  Exclusive of '-l', '-a', and '-c' options.  This
                   option implies SSH '-T' flag (pseudo-tty disabled).
 
@@ -242,8 +245,8 @@ USAGE(S):  #{$script_name} <-h|--help>
   -i | --interactive
 
                   Optional.  Thread count will always be set to one in this
-                  case.  This will result in a query of yes/no (y/n) to proceed
-                  for each node.
+                  case.  Result in a query of yes/no (y/n) to proceed for
+                  each node.
 
   -l              Optional.  Local execution.  Mutually exclusive from '-c'
                   option.
@@ -259,9 +262,9 @@ USAGE(S):  #{$script_name} <-h|--help>
 
   -N | --non-unix
                   Optional.  Support for non-Unix hosts with custom and
-                  proprietary shell or custom-made command line interface which
-                  is incompatible with typical Unix environment.  For example
-                  the Cisco IronPort AsyncOS and Cisco IOS.
+                  proprietary shell or custom-made command line interface
+                  which is incompatible with typical Unix environment.  For
+                  example the Cisco IronPort AsyncOS and Cisco IOS.
 
                   Mutually exclusive from '--legacy-mode' option.
 
@@ -273,9 +276,9 @@ USAGE(S):  #{$script_name} <-h|--help>
   -n | --numbers  Optional.  If used, all other options will be ignored except
                   the '-s' option.  This option will ask DSH to display a
                   numeric summary of all servers from the '-s' option, then
-                  exit.  The top-level classess will be scanned recursively and
-                  output will containt list and summation including all their
-                  children classses.
+                  exit.  The top-level classess will be scanned recursively
+                  and output will containt list and summation including all
+                  their children classses.
 
   --pseudo-tty    Optional.  If set, enable SSH pseudo-tty allocation (-ttt).
                   Default is to disable SSH pseudo-tty allocation (-T).  This
@@ -304,9 +307,9 @@ USAGE(S):  #{$script_name} <-h|--help>
                   Bracket expansion format:
                     host[1-5,10].name[2,4,6].domain[1-10].example
 
-                    In this case the '1-5' denotes range between 1 and 5 whereas
-                    '10' simply represents a single host which will be included
-                    as a part of the expansion.
+                    In this case the '1-5' denotes range between 1 and 5
+                    whereas '10' simply represents a single host which will
+                    be included as a part of the expansion.
 
                     All brackets will be expanded accordingly and in order
                     of appearance.
@@ -319,8 +322,8 @@ USAGE(S):  #{$script_name} <-h|--help>
                   display information that is of the interest.  The expression
                   will be converted to a case-insensitive before applying.
 
-                  Please note that if the given regular expression is incorrect
-                  then the default catch-all filter will be applied instead.
+                  If the given regular expression is incorrect, then the
+                  default catch-all filter will be applied instead.
 
   --find-class <filter>
 
@@ -329,13 +332,13 @@ USAGE(S):  #{$script_name} <-h|--help>
   --show-host <filter>
 
                   Optional.  Display all known classes and hosts.  This option
-                  works almost like the '--show-class' with a subtle difference
-                  that the regular expression filter given as '<filter>' will
-                  be applied to hosts part instead of the classes part allowing
-                  for per-host lookup.
+                  works like the '--show-class' with a subtle difference
+                  except that the regular expression filter given as <filter>
+                  will be applied to hosts part instead of the classes part
+                  allowing for per-host lookup.
 
-                  Please note that if the given regular expression is incorrect
-                  then the default catch-all filter will be applied instead.
+                  If the given regular expression is incorrect, then the
+                  default catch-all filter will be applied instead.
 
   --find-host <filter>
 
@@ -344,21 +347,21 @@ USAGE(S):  #{$script_name} <-h|--help>
   --statistics    Optional.  Display some statistical information about number
                   of classes and hosts as a short summary.
 
-  --ssh-quiet     Optional.  Defaults to false.  If set, use of option '-q' will
-                  be applied to ssh commands.  Doesn't apply if '-c' is used.
+  --ssh-quiet     Optional.  Defaults to false.  If set, option '-q' will be
+                  applied to ssh commands.  Doesn't apply if '-c' is used.
 
   --ssh-knownhostsnull
 
                   Optional.  If set, add "-o UserKnownHostsFile=/dev/null" to
-                  ssh options.  Note that this will in effect look at all hosts
-                  as new hosts in ssh.  The "Warning:" message is suppressed!
+                  ssh options.  This will in effect look at all hosts as new
+                  hosts in ssh.  The "Warning:" message would get suppressed!
 
   --ssh-stricthostkeychk
 
                   Optional.  If set, add "-o StrictHostKeyChecking=yes" to
                   ssh options.  Default is "-o StrictHostKeyChecking=no".
                   This option is to auto add keys for new or reinstalled hosts
-                  signatures.  We normally wouldn't do this with SSH, but saves
+                  signatures.  Normally wouldn't do this with SSH, but saves
                   on having to manually answer 'yes' each time for new boxes.
                   Yes, it is an *unsecure* feature ...
 
@@ -406,14 +409,14 @@ USAGE(S):  #{$script_name} <-h|--help>
 
 NOTES:
 
-  * You can use '__HOST__' as a place holder to be replace with *this* host in
+  * Use '__HOST__' as a place holder to be replace with *this* host in
     execution.
 
-  * You can use '__SHOST__' as a place holder to be replace with *this* host in
+  * Use '__SHOST__' as a place holder to be replace with *this* host in
     execution, but with *this* host shortened; i.e., if hostname was
     'host.domain.name', then '__SHOST__' is 'host'.
 
-  * You can use '__SSH_PORT__' as a place holder to be replace with SSH port
+  * Use '__SSH_PORT__' as a place holder to be replace with SSH port
     to be used for *this* host.
 
 EXAMPLES:
@@ -553,7 +556,7 @@ def fn_show_class(class_filter='', host_filter='')
 end
 
 # ----------
-# Function to some statistical information about number of classes and hosts ...
+# Function to some statistical information about number of classes and hosts.
 # ----------
 def fn_print_statistics
 
@@ -1016,7 +1019,7 @@ def fn_do_ssh(
   enhanced_mode, script_interpreter='/bin/bash'
 )
 
-  # Note that '-T' disables pseudo-tty allocation used to suppress the standard
+  # '-T' disables pseudo-tty allocation used to suppress the standard
   #   SSH warning.  It is on by default and passed to this function through
   #   ssh_opt.
 
@@ -1042,6 +1045,7 @@ def fn_do_ssh(
   end
 
   this_cmd  = "ssh -x"
+  this_cmd  = "#{$arg_prefix} #{this_cmd}" if not $arg_prefix.nil?
   this_cmd  = "#{this_cmd} -p #{this_port}" if this_port != 0
   this_cmd  = "#{this_cmd} -i #{id_file}" if not id_file.nil?
   this_cmd += " #{ssh_opt}"
@@ -1212,7 +1216,8 @@ def get_zero_padding_count(number)
 end
 
 # ----------
-# Function replaces every occurence of [] with numeric values with are zero padded ...
+# Function replaces every occurence of [] with numeric values with are zero
+#   padded ...
 # ----------
 def hostname_pattern_replace(hostnames, values, zero_padding)
   ret=Array.new
@@ -1225,13 +1230,18 @@ def hostname_pattern_replace(hostnames, values, zero_padding)
 end
 
 # ----------
-# Function by default replaces every ocurrence of "," with ";" but only when inside [] ...
+# Function by default replaces every ocurrence of "," with ";" but only when
+#   inside [] ...
 # ----------
 def replace_comas(str, from=',', to=';')
   str.gsub(/\[\S+?\]/) { |match| match.tr(from,to) }
 end
 
-# ------------------------- MAIN ------------------------- #
+#
+#
+# ------------------------- MAIN -------------------------
+#
+#
 
 #
 # Declaring variables (globals and locals) ...
@@ -1258,16 +1268,20 @@ arg_tty     = false # If true, enabled SSH tty allocation ...
 arg_enhance = true  # If true, use "shell" variable or and inject '##DSH##'
                     #   in SSH call ...
 
-arg_sudo    = false # Use sudo to execute commands ...
-sudo_msg    = ''    # Message to print for sudo ...
+arg_sudo = false # Use sudo to execute commands ...
+sudo_msg = ''    # Message to print for sudo ...
 
-$arg_echo   = false # If true, echo commands but not execute ...
+$arg_prefix = nil # If set, put prefix in front of each "ssh" execution ...
+
+$arg_echo = false # If true, echo commands but not execute ...
 
 arg_interactive = false # Request query of yes/no before proceeding to
                         #   next host ...
 
-$arg_normal_actions = false  # Normal mode of evaluation of action/command to execute ...
-$arg_raw_actions    = false  # Suppress evaluation of action/command to execute ...
+$arg_normal_actions = false  # Normal mode of evaluation of action/command to
+                             #   execute ...
+$arg_raw_actions    = false  # Suppress evaluation of action/command to
+                             #   execute ...
 
 # Selecting only certain hosts in list ...
 arg_start = 0
@@ -1280,7 +1294,7 @@ $arg_verbose  = true  # Do verbose ...
 $arg_unique   = false # Group similar output ...
 $arg_raw      = false # Not verbose, just raw data ...
 $arg_raw_host = false # Not verbose, just raw data, but prepend w/hostname ...
-$arg_non_unix = false # Support for non-Unix hosts with custom and private shell ...
+$arg_non_unix = false # Support for non-*nix with custom/private shell ...
 $max_host_ln  = 0
 $max_class_ln = 0
 $max_line_ln  = 64    # Max characters to print on a given line ...
@@ -1326,6 +1340,7 @@ begin
   cmd_opts.set_options(
     [ "--actions",      "-a",   GetoptLong::REQUIRED_ARGUMENT ],
     [ "--raw-actions",  "-A",   GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--cmd-prefix",           GetoptLong::REQUIRED_ARGUMENT ],
     [ "--display",      "-d",   GetoptLong::NO_ARGUMENT       ],
     [ "--echo",                 GetoptLong::NO_ARGUMENT       ],
     [ "--except",       "-e",   GetoptLong::REQUIRED_ARGUMENT ],
@@ -1373,6 +1388,7 @@ begin
       when   /--raw-actions$|-A$/
         $arg_raw_actions = true
         arg_actions = arg.to_s
+      when        /--cmd-prefix$/ then $arg_prefix          = arg.to_s
       when       /--display$|-d$/ then arg_display          = true
       when              /--echo$/ then $arg_echo            = true
       when       /--legacy-mode$/ then arg_enhance          = false
