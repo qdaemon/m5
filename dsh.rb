@@ -182,7 +182,7 @@ USAGE(S):  #{$script_name} <-h|--help>
 
   -a | --actions <command to send to hosts>
 
-                  Required unless using the '--show-hosts' option.
+                  Required unless using the '-n' option.
 
   -A | --raw-actions <command to send to hosts>
 
@@ -220,12 +220,6 @@ USAGE(S):  #{$script_name} <-h|--help>
 
   --echo          Optional.  Echo commands but not execute.
 
-  -f | --file <name of script file>
-
-                  Optional.  Execute a script at remote host.  Only applies
-                  to SSH.  Exclusive of '-l', '-a', and '-c' options.  This
-                  option implies SSH '-T' flag (pseudo-tty disabled).
-
   --filterscript <filename>
 
                   Optional.  Execute script <filename> against each result
@@ -250,25 +244,7 @@ USAGE(S):  #{$script_name} <-h|--help>
                   case.  Result in a query of yes/no (y/n) to proceed for
                   each node.
 
-  -l              Optional.  Local execution.  Mutually exclusive from '-c'
-                  option.
-
-  --legacy-mode   Optional.  Don't use 'shell' variable or and inject
-                  '##DSH##' which only applies to SSH actions and incompatible
-                  with '-c' option.  This is mainly to solve for the quoting
-                  issues with using SSH; e.g., allows this to work ...
-
-                    dsh.rb -s servers -a "awk -F':' '{print \$1}' /etc/passwd"
-
-                  So if using legacy-mode, the above will fail.
-
-  -N | --non-unix
-                  Optional.  Support for non-Unix hosts with custom and
-                  proprietary shell or custom-made command line interface
-                  which is incompatible with typical Unix environment.  For
-                  example the Cisco IronPort AsyncOS and Cisco IOS.
-
-                  Mutually exclusive from '--legacy-mode' option.
+  -l              Optional.  Local execution.
 
   -L | --log <log_file>
 
@@ -283,17 +259,13 @@ USAGE(S):  #{$script_name} <-h|--help>
                   their children classses.
 
   --pseudo-tty    Optional.  If set, enable SSH pseudo-tty allocation (-ttt).
-                  Default is to disable SSH pseudo-tty allocation (-T).  This
-                  is incompatible with -S|--sudo and -f|--file options.
+                  Default is to disable SSH pseudo-tty allocation (-T).
 
   -q | --quiet    Optional.  Don't be so verbose.
 
   --raw           Optional.  Just raw data, no host info, no nothing!!!
 
-  --raw_host      Optional.  Just raw data, but prepend with host info.
-
-  --raw-host      Optional.  Same as '--raw_host' but using '-' (dash) in the
-                  option name.
+  --raw-host      Optional.  Just raw data, but prepend with host info.
 
   -s | --servers <comma delimited list, see below for format>
 
@@ -376,8 +348,6 @@ USAGE(S):  #{$script_name} <-h|--help>
                   Note!  This will be applied before the --except flag.
 
   --sort          Optional.  Print results sorted on servers (-s).
-
-  -S | --sudo     Optional.  Adds 'sudo <shell>' to '-a' argument.
 
   -t | --threads <n>
 
@@ -995,31 +965,9 @@ def check_open_port( host, port )
 end
 
 # ----------
-# Function to parse shebang (#!) and return the interpreter part ...
-# ----------
-def fn_get_interpreter( filename, script_interpreter='/bin/bash' )
-  rtn = script_interpreter # Default to bash if no shebang ...
-  begin
-    if File.exist?( filename )
-      tmp_f = File.open( filename, 'r' )
-      rtn = $1 if ( tmp_f.gets =~ /#!(.*$)/ )  # Read only the first line ...
-      tmp_f.close
-    else
-      fn_exception( "ERR", "File '#{filename}' does not exist!", 2 )
-    end
-    rescue
-     fn_exception( "ERR", $!, 2 )
-  end
-  return rtn
-end
-
-# ----------
 # Function to do the "ssh" ...
 # ----------
-def fn_do_ssh(
-  host, this_user, action, filename, max_time, ssh_opt, sudo_enabled,
-  enhanced_mode, script_interpreter='/bin/bash'
-)
+def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
 
   # '-T' disables pseudo-tty allocation used to suppress the standard
   #   SSH warning.  It is on by default and passed to this function through
@@ -1030,20 +978,10 @@ def fn_do_ssh(
   host, ssh_port, id_file, id_user = fn_parse_host_ssh( host )
   this_port = ( ssh_port.nil? ? $configs['SSH_PORT'] : ssh_port ).to_i
   this_user = id_user if not id_user.nil?
-  shell = ''
 
-  if filename.nil?
-    unless $arg_raw_actions
-      action = action.gsub(/__HOST__/, host)
-      action = action.gsub(/__SHOST__/, host.split('.')[0])
-    end
-    shell  = ('' if $arg_non_unix) || (sudo_enabled ? \
-      "sudo #{script_interpreter}" : script_interpreter)
-  else
-    shell = fn_get_interpreter(filename)
-    if sudo_enabled
-      shell = "sudo #{shell}"
-    end
+  unless $arg_raw_actions
+    action = action.gsub(/__HOST__/, host)
+    action = action.gsub(/__SHOST__/, host.split('.')[0])
   end
 
   this_cmd  = "ssh -x"
@@ -1057,19 +995,10 @@ def fn_do_ssh(
     print "\n    ECHO-SUB::#{this_cmd}"
     return rtn_errors
   else
-    if filename.nil?
-      if enhanced_mode
-        this_cmd += " '#{shell}' 2>&1 << '##dsh##'\n#{action}\n##dsh##"
-      else
-        this_cmd += " '#{action}' 2>&1"
-      end
-    else
-      this_cmd += " '#{shell}' 2>&1 < #{filename}"
-    end
+    this_cmd += " '#{action}' 2>&1"
 
     # DEBUG ...
     #puts "this_user = #{this_user}",
-    #     "shell     = #{shell}",
     #     "this_cmd  = #{this_cmd}",
     #     "action    = #{action}"
 
@@ -1114,9 +1043,6 @@ def fn_do_ssh(
 
   time_test = ( Time.now - time_test ).to_i  # "Stopping" time count ...
 
-  if not filename.nil?
-    output_message = "***** SCRIPT [#{filename}] OUTPUT ...\n" + output_message
-  end
   summation_host( host, time_test, output_message )
 
   return rtn_errors
@@ -1259,19 +1185,12 @@ $sline = "********************************************************************"
 arg_servers = nil   # Trusted servers to execute against ...
 arg_except  = nil   # Do not perform actions against these servers ...
 arg_actions = nil   # Action/command to execute against trusted servers ...
-arg_file    = nil   # Script to be executed remotely
 arg_local   = false # Assume remote execution ...
 arg_confirm = true  # Confirm before execution ...
 arg_display = false # Display host names only ...
 arg_numbers = false # Display counts of hosts; special logic in grouping ...
 arg_ssh     = ''    # Any additional SSH args ...
 arg_tty     = false # If true, enabled SSH tty allocation ...
-
-arg_enhance = true  # If true, use "shell" variable or and inject '##DSH##'
-                    #   in SSH call ...
-
-arg_sudo = false # Use sudo to execute commands ...
-sudo_msg = ''    # Message to print for sudo ...
 
 $arg_prefix = nil # If set, put prefix in front of each "ssh" execution ...
 
@@ -1296,7 +1215,6 @@ $arg_verbose  = true  # Do verbose ...
 $arg_unique   = false # Group similar output ...
 $arg_raw      = false # Not verbose, just raw data ...
 $arg_raw_host = false # Not verbose, just raw data, but prepend w/hostname ...
-$arg_non_unix = false # Support for non-*nix with custom/private shell ...
 $max_host_ln  = 0
 $max_class_ln = 0
 $max_line_ln  = 64    # Max characters to print on a given line ...
@@ -1346,7 +1264,6 @@ begin
     [ "--display",      "-d",   GetoptLong::NO_ARGUMENT       ],
     [ "--echo",                 GetoptLong::NO_ARGUMENT       ],
     [ "--except",       "-e",   GetoptLong::REQUIRED_ARGUMENT ],
-    [ "--file",         "-f",   GetoptLong::REQUIRED_ARGUMENT ],
     [ "--host-filter",          GetoptLong::REQUIRED_ARGUMENT ],
     [ "--hush",                 GetoptLong::NO_ARGUMENT       ],
     [ "--hush-unique",          GetoptLong::NO_ARGUMENT       ],
@@ -1359,7 +1276,6 @@ begin
     [ "--pseudo-tty",           GetoptLong::NO_ARGUMENT       ],
     [ "--quiet",        "-q",   GetoptLong::NO_ARGUMENT       ],
     [ "--raw",                  GetoptLong::NO_ARGUMENT       ],
-    [ "--raw_host",             GetoptLong::NO_ARGUMENT       ],
     [ "--raw-host",             GetoptLong::NO_ARGUMENT       ],
     [ "--servers",      "-s",   GetoptLong::REQUIRED_ARGUMENT ],
     [ "--show-class",           GetoptLong::OPTIONAL_ARGUMENT ],
@@ -1393,12 +1309,7 @@ begin
       when        /--cmd-prefix$/ then $arg_prefix          = arg.to_s
       when       /--display$|-d$/ then arg_display          = true
       when              /--echo$/ then $arg_echo            = true
-      when       /--legacy-mode$/ then arg_enhance          = false
-      when          /--non-unix$/ then $arg_non_unix        = true
       when        /--except$|-e$/ then arg_except           = arg.to_s
-      when          /--file$|-f$/
-        arg_file = arg.to_s
-        arg_ssh += " -T"
       when       /--host-filter$/ then $host_filter         = arg.to_s
       when       /--hush-unique$/
         $arg_verbose = false
@@ -1421,7 +1332,7 @@ begin
         $arg_verbose = false
         $arg_raw = true
         show_ending_summation = false
-      when /--raw_host$|--raw-host/
+      when /--raw-host$/
         $arg_verbose = false
         $arg_raw_host = true
         show_ending_summation = false
@@ -1442,7 +1353,6 @@ begin
         arg_start = arg_start.to_i
         arg_step  = arg_step.to_i
       when              /--sort$/ then $arg_sort            = true
-      when          /--sudo$|-S$/ then arg_sudo             = true
       when       /--threads$|-t$/ then arg_threads          = arg.to_i
       when          /--user$|-u$/ then $configs['SSH_USER'] = arg.to_s
       when                  /-w$/ then arg_timeout          = arg.to_i
@@ -1463,11 +1373,6 @@ begin
   rescue
     fn_exception( "ERR", $!, 1, true )
 end
-
-#
-# Enabled SSH TTY allocation by default if not in legacy-mode ...
-#
-arg_ssh += " -T" if arg_enhance
 
 #
 # Test log_file for suitability:  Exist? Writeable?
@@ -1528,33 +1433,10 @@ if $arg_normal_actions and $arg_raw_actions
 end
 
 #
-# Options -a and -f are mutually exclusive ...
-#
-if arg_actions and arg_file
-  fn_exception( "ERR", "-a and -f options are mutually exclusive!", 1, true )
-end
-
-#
-# Options -S and -f are incompatible with --pseudo-tty ...
-#
-if arg_tty and ( arg_file or arg_sudo )
-  fn_exception( "ERR", "-S and -f options are incompatible with --pseudo-tty!", 1, true )
-end
-
-#
-# Options -N and --legacy-mode are mutually exclusive ...
-#
-if $arg_non_unix and (not arg_enhance)
-  fn_exception( "ERR", "-N and --legacy-mode options are mutually exclusive!", 1, true )
-end
-
-#
 # Check for non-empty servers and actions ...
 #
 if arg_servers.nil?
   fn_exception( "ERR", "Must specify server(s)!", 1, true )
-elsif not ( arg_display or arg_numbers ) and arg_actions.nil? and arg_file.nil?
-  fn_exception( "ERR", "Must specify '-a' action(s) or '-f' script to be executed option!", 1, true )
 end
 
 #
@@ -1568,13 +1450,6 @@ elsif arg_threads > max_threads
   fn_exception( "WARN",
     "Thread setting > max allowed - reset to max, #{max_threads}", -1 )
   arg_threads = max_threads
-end
-
-#
-# Check for sudo flag. If set than use sudo in arg_actions ...
-#
-if arg_sudo
-  sudo_msg = "as \e[1;31mroot\e[m"
 end
 
 #
@@ -1679,12 +1554,7 @@ $arg_sort_stack.sort! if ( $arg_sort and $arg_sort_stack.length > 0 )
 
 # Allow last chance to change your mind (unless '-y' flag was used) ...
 if arg_confirm
-  if arg_file.nil?
-    summation( arg_timeout, arg_threads, 0, arg_actions, hosts_todo, [] )
-  else
-    summation( arg_timeout, arg_threads, 0,
-      "Execute script #{arg_file} #{sudo_msg}",  hosts_todo, [] )
-  end
+  summation( arg_timeout, arg_threads, 0, arg_actions, hosts_todo, [] )
   fn_print( "Continue with the above parameters (y/n) [default = n]? ", false )
   if not gets =~ /y|Y/
     if $write_to_log ; then $log_file_hdl.puts '' ; else puts '' ; end
@@ -1724,10 +1594,7 @@ hosts_todo.each { |site|
       err_found << if arg_local
         fn_do_local( host, arg_actions, arg_timeout )
       else
-        fn_do_ssh(
-          host, this_user, arg_actions, arg_file, arg_timeout,
-          arg_ssh, arg_sudo, arg_enhance
-        )
+        fn_do_ssh( host, this_user, arg_actions, arg_timeout, arg_ssh )
       end
     }
 
@@ -1830,13 +1697,8 @@ end
 #
 time_total = time_fini - time_start
 if show_ending_summation
-  if arg_file.nil?
-    summation( arg_timeout, arg_threads, time_total,
-      arg_actions, hosts_todo, err_found )
-  else
-    summation( arg_timeout, arg_threads, time_total,
-      "Execute script #{arg_file} #{sudo_msg}", hosts_todo, err_found )
-  end
+  summation( arg_timeout, arg_threads, time_total,
+    arg_actions, hosts_todo, err_found )
   fn_print( "***** FINI!" )
 end
 
