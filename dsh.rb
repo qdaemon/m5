@@ -1,5 +1,6 @@
 #!/usr/bin/env ruby
-
+#
+# NOTE!!! This is only tested with Ruby 1.8.x.
 #
 # dsh.rb came out of a need to have a tool to perform actions against large
 # numbers of Unix based O/S.
