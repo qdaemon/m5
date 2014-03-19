@@ -14,9 +14,8 @@
 #   DSH_USER - To override default user
 #
 #   DSH_CONF - Basically to load an additional config file after the load
-#              of the default.  So in effect you can override by specifying
-#              an existing variable with new parameters in this secondary
-#              file
+#     of the default.  So in effect you can override by specifying an existing
+#     variable with new parameters in this secondary file.
 #
 #   DSH_MAX_HOSTNAME - Override max_hostname in summation function.
 #
@@ -28,37 +27,39 @@
 # ...
 #
 #   SSH_USER - SSH user to use when using SSH mechanism.  Defaults to "root".
-#             Can be overriden by DSH_USER environment variable.
+#     Can be overriden by DSH_USER environment variable.
 #
 #   SSH_PORT - Port to use when using SSH mechanism. Defaults to 22.  If set
-#             to 0, then don't set port in ssh command; i.e., suppress (-p)
-#             option.
+#     to 0, then don't set port in ssh command; i.e., suppress (-p) option.
 #
 #   DEFAULT_THREADS - Default number of threads to use (default to 1).  "-t"
-#             option is used to override.
+#     option is used to override.
 #
 #   MAX_THREADS - Absolute max number of threads allowed.  Defaults to 48.
 #
 #   MIN_THREADS - Absolute min number of threads allowed.  Defaults to 1.
 #
 #   CONNECTION_TIMEOUT - How many seconds to wait just to open a connection.
-#             Defaults to 7.
+#     Defaults to 7.
 #
 #   ACTION_TIMEOUT - How many seconds to wait to complete the action.
-#             Defaults to 300.
+#     Defaults to 300.
 #
 #   CLASSES - A hash of arrays where a given key is  "prefixed" to to each
-#             item in its array to form a classname or a hostname; e.g.,
-#             a key/value pair of "'ui' => [ 001, 002, 003 ]" would produce
-#             "ui001,ui002,ui003" when processed by dsh.rb.
+#     item in its array to form a classname or a hostname; e.g., a key/value
+#     pair of "'ui' => [ 001, 002, 003 ]" would produce "ui001,ui002,ui003"
+#     when processed by dsh.rb.
 #
-#   CLASSES_EXTENDED - A hash of arrays where a given key is a classname
-#             and its array is the list of classes and/or hosts that are
-#             contained in said classname.
+#   CLASSES_EXTENDED - A hash of arrays where a given key is a classname and
+#     its array is the list of classes and/or hosts that are contained in
+#     said classname.
 #
-#   LOG_FILE - Log file to use.  If this is not set and "--log" not
-#              used, then no logs will be written.  No defaults.
-#              Note that ENV['USER'] will be tacked on to logname!
+#   LOG_FILE - Log file to use.  If this is not set and "--log" not used, then
+#   no logs will be written.  No defaults.  Note that ENV['USER'] will be
+#   tacked on to logname!
+#
+#   FILTERSCRIPT - Specify script/program name to filter results with.  Treat 
+#     script/program as if results were piped through it.
 #
 
 #
@@ -108,7 +109,7 @@ load dsh_conf if FileTest.readable?( dsh_conf )
 $configs = {} if $configs.nil?
 $globals = {
   "ACTION_TIMEOUT"     => 300,
-  "CONNECTION_TIMEOUT" => 7,
+  "CONNECTION_TIMEOUT" => 10,
   "DEFAULT_THREADS"    => 1,
   "ENABLE_ALL"         => false,
   "MIN_THREADS"        => 1,
@@ -116,13 +117,14 @@ $globals = {
   "SSH_PORT"           => 22,
   "SSH_USER"           => "root",
   "CLASSES"            => {},
-  "CLASSES_EXTENDED"   => {}
+  "CLASSES_EXTENDED"   => {},
+  "FILTERSCRIPT"       => nil
 }
 $globals.each { |k,v| $configs[k] = ( $configs.has_key?(k) ? $configs[k] : v ) }
 $globals.keys.each { |k|
   tmp_env = "DSH_#{k}"
   if ENV.has_key?(tmp_env)
-    $globals[k] = ENV[tmp_env] if ENV[tmp_env] != ''
+    $configs[k] = ENV[tmp_env] if ENV[tmp_env] != ''
   end
 }
 $globals['PID'] = $$ # This has to come after the overrides as this should
@@ -182,7 +184,7 @@ USAGE(S):  #{$script_name} <-h|--help>
 
   -a | --actions <command to send to hosts>
 
-                  Required unless using the '-n' option.
+                  Required unless using the '--show-hosts' option.
 
   -A | --raw-actions <command to send to hosts>
 
@@ -226,7 +228,6 @@ USAGE(S):  #{$script_name} <-h|--help>
                   before printout.  <filename> can be a command since the
                   code just cat/pipes each output to <filename>.
 
-
   -h | --help     Optional.  Display usage.
 
   --hush          Optional.  Not verbose and no ending summation.
@@ -244,7 +245,8 @@ USAGE(S):  #{$script_name} <-h|--help>
                   case.  Result in a query of yes/no (y/n) to proceed for
                   each node.
 
-  -l              Optional.  Local execution.
+  -l              Optional.  Local execution.  Mutually exclusive from '-c'
+                  option.
 
   -L | --log <log_file>
 
@@ -265,7 +267,10 @@ USAGE(S):  #{$script_name} <-h|--help>
 
   --raw           Optional.  Just raw data, no host info, no nothing!!!
 
-  --raw-host      Optional.  Just raw data, but prepend with host info.
+  --raw_host      Optional.  Just raw data, but prepend with host info.
+
+  --raw-host      Optional.  Same as '--raw_host' but using '-' (dash) in the
+                  option name.
 
   -s | --servers <comma delimited list, see below for format>
 
@@ -394,7 +399,7 @@ NOTES:
 EXAMPLES:
 
   #{$script_name} -h                     # To display usage info ...
-  #{$script_name} -s servers -a 'uptime' # Will send command 'uptime' to group of remote 'servers' ...
+  #{$script_name} -s servers -a 'uptime' # Exec 'uptime' to 'servers' ...
 
 END_OF_USAGE
 
@@ -996,13 +1001,12 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
     return rtn_errors
   else
     this_cmd += " '#{action}' 2>&1"
-
-    # DEBUG ...
-    #puts "this_user = #{this_user}",
-    #     "this_cmd  = #{this_cmd}",
-    #     "action    = #{action}"
-
   end
+
+  # DEBUG ...
+  #puts "this_user = #{this_user}",
+  #     "this_cmd  = #{this_cmd}",
+  #     "action    = #{action}"
 
   this_proc      = nil    # Handle to ssh process to be executed ...
   conn_good      = false  # Assume bad connection until checked ...
@@ -1220,7 +1224,12 @@ $max_class_ln = 0
 $max_line_ln  = 64    # Max characters to print on a given line ...
 $host_filter  = ''
 $arg_wrapper  = nil   # If not nil, wrap results with custom text ...
-$arg_filter   = nil   # If not nil, exec script against result ...
+
+# If not nil, exec script against result ...
+$arg_filter = nil
+if $configs.has_key?('FILTERSCRIPT')
+  $arg_filter = $configs['FILTERSCRIPT'] if not $configs['FILTERSCRIPT'] == ""
+end
 
 # For sorting output if option set (--sort) ...
 $arg_sort       = false # Sort enabled (true) or not (false) ...
@@ -1269,13 +1278,12 @@ begin
     [ "--hush-unique",          GetoptLong::NO_ARGUMENT       ],
     [ "--interactive",  "-i",   GetoptLong::NO_ARGUMENT       ],
     [                   "-l",   GetoptLong::NO_ARGUMENT       ],
-    [ "--legacy-mode",          GetoptLong::NO_ARGUMENT       ],
-    [ "--non-unix",     "-N",   GetoptLong::NO_ARGUMENT       ],
     [ "--log",          "-L",   GetoptLong::REQUIRED_ARGUMENT ],
     [ "--numbers",      "-n",   GetoptLong::NO_ARGUMENT       ],
     [ "--pseudo-tty",           GetoptLong::NO_ARGUMENT       ],
     [ "--quiet",        "-q",   GetoptLong::NO_ARGUMENT       ],
     [ "--raw",                  GetoptLong::NO_ARGUMENT       ],
+    [ "--raw_host",             GetoptLong::NO_ARGUMENT       ],
     [ "--raw-host",             GetoptLong::NO_ARGUMENT       ],
     [ "--servers",      "-s",   GetoptLong::REQUIRED_ARGUMENT ],
     [ "--show-class",           GetoptLong::OPTIONAL_ARGUMENT ],
@@ -1287,7 +1295,6 @@ begin
     [ "--ssh-stricthostkeychk", GetoptLong::NO_ARGUMENT       ],
     [ "--step",                 GetoptLong::REQUIRED_ARGUMENT ],
     [ "--sort",                 GetoptLong::NO_ARGUMENT       ],
-    [ "--sudo",         "-S",   GetoptLong::NO_ARGUMENT       ],
     [ "--threads",      "-t",   GetoptLong::REQUIRED_ARGUMENT ],
     [ "--user",         "-u",   GetoptLong::REQUIRED_ARGUMENT ],
     [                   "-w",   GetoptLong::REQUIRED_ARGUMENT ],
@@ -1332,7 +1339,7 @@ begin
         $arg_verbose = false
         $arg_raw = true
         show_ending_summation = false
-      when /--raw-host$/
+      when /--raw_host$|--raw-host/
         $arg_verbose = false
         $arg_raw_host = true
         show_ending_summation = false
@@ -1373,6 +1380,11 @@ begin
   rescue
     fn_exception( "ERR", $!, 1, true )
 end
+
+#
+# Disabled SSH TTY allocation ...
+#
+arg_ssh += " -T" if not arg_tty
 
 #
 # Test log_file for suitability:  Exist? Writeable?
@@ -1437,6 +1449,8 @@ end
 #
 if arg_servers.nil?
   fn_exception( "ERR", "Must specify server(s)!", 1, true )
+elsif not ( arg_display or arg_numbers ) and arg_actions.nil?
+  fn_exception( "ERR", "Must specify '-a' action(s) to be executed option!", 1, true )
 end
 
 #
@@ -1697,8 +1711,7 @@ end
 #
 time_total = time_fini - time_start
 if show_ending_summation
-  summation( arg_timeout, arg_threads, time_total,
-    arg_actions, hosts_todo, err_found )
+  summation( arg_timeout, arg_threads, time_total, arg_actions, hosts_todo, err_found )
   fn_print( "***** FINI!" )
 end
 
