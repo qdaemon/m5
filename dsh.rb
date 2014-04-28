@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/env ruby1.8
 #
 # NOTE!!! This is only tested with Ruby 1.8.x.
 #
@@ -268,10 +268,7 @@ USAGE(S):  #{$script_name} <-h|--help>
 
   --raw           Optional.  Just raw data, no host info, no nothing!!!
 
-  --raw_host      Optional.  Just raw data, but prepend with host info.
-
-  --raw-host      Optional.  Same as '--raw_host' but using '-' (dash) in the
-                  option name.
+  --raw-host      Optional.  Just raw data, but prepend with host info.
 
   -s | --servers <comma delimited list, see below for format>
 
@@ -1284,7 +1281,6 @@ begin
     [ "--pseudo-tty",           GetoptLong::NO_ARGUMENT       ],
     [ "--quiet",        "-q",   GetoptLong::NO_ARGUMENT       ],
     [ "--raw",                  GetoptLong::NO_ARGUMENT       ],
-    [ "--raw_host",             GetoptLong::NO_ARGUMENT       ],
     [ "--raw-host",             GetoptLong::NO_ARGUMENT       ],
     [ "--servers",      "-s",   GetoptLong::REQUIRED_ARGUMENT ],
     [ "--show-class",           GetoptLong::OPTIONAL_ARGUMENT ],
@@ -1340,7 +1336,7 @@ begin
         $arg_verbose = false
         $arg_raw = true
         show_ending_summation = false
-      when /--raw_host$|--raw-host/
+      when /--raw-host$/
         $arg_verbose = false
         $arg_raw_host = true
         show_ending_summation = false
@@ -1728,3 +1724,4 @@ begin
 end
 
 exit( 0 )
+
