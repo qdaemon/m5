@@ -1,6 +1,4 @@
-#!/usr/bin/env ruby1.8
-#
-# NOTE!!! This is only tested with Ruby 1.8.x.
+#!/usr/bin/env ruby
 #
 # dsh.rb came out of a need to have a tool to perform actions against large
 # numbers of Unix based O/S.
@@ -86,14 +84,13 @@ ARGV.each { |a|
 }
 
 $stderr.reopen $stdout # Sending STDERR to STDOUT ...
-$defout.sync = true    # Don't buffer I/O ...
 
 # Use our local lib first; note the relative path (../lib/) ...
 $:.unshift File.join( File.dirname(__FILE__), "..", "lib" )
 
-require 'net/telnet'
+require 'thread'
+require 'socket'
 require 'timeout'
-require "md5"
 require 'getoptlong'
 
 # Load default configurations: Classes, et al.  Not absolutely required ...
@@ -676,7 +673,7 @@ def get_hosts_list( this_list, recurse_limit )
   return rtn if this_list.nil? or this_list.length == 0
   srv_list = []
   replace_comas(this_list).split(/,/).each { |i|
-    srv_list += get_expanded_hostnames(i).to_a
+    srv_list << get_expanded_hostnames(i)
   }
   # Only process one item at a time.  If more than one, then recurse ...
   if srv_list.length > 1
@@ -846,7 +843,7 @@ EndOfCommand
     h   = tmp_print_stack.shift
     t   = $arg_sort_data[h]['t']
     msg = $arg_sort_data[h]['msg']
-    Thread.critical = true
+    @lock.synchronize {
     if $arg_verbose
       if $arg_wrapper.nil?
         fn_print( $dline )
@@ -867,7 +864,7 @@ EndOfCommand
         h,
         msg.to_s.split(/\n/).join(' | ').gsub(/\s+/,' ')
     end
-    Thread.critical = false
+    }
   end
 
   return 0
@@ -943,28 +940,17 @@ end
 # ----------
 # Function to verify a port on given host is listening ...
 # ----------
-def check_open_port( host, port )
-
-  rtn = [ false, "UNKNOWN" ] # Assume port is not open ...
-  host = fn_parse_host_ssh( host )[0]
-  begin
-    conn = Net::Telnet.new(
-      'Host' => host, 'Port' => port,
-      'Binmode' => true, 'Telnetmode' => false,
-      'Timeout' => $configs['CONNECTION_TIMEOUT']
-    )
-    rtn = [ true, "IS_OPEN" ] if conn
-    rescue TimeoutError
-      rtn[1] = $!
-    rescue SocketError
-      rtn[1] = $!
-    rescue
-      rtn[1] = $!
-    ensure
-      conn.shutdown if conn
+def check_open_port(host, port, conn_timeout=3)
+  Timeout::timeout(conn_timeout) do
+    begin
+      TCPSocket.new(host, port).close
+      [ true, "IS_OPEN" ]
+    rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH
+      [ false, $! ]
+    end
   end
-  return rtn
-
+rescue Timeout::Error
+  [ false, $! ]
 end
 
 # ----------
@@ -1584,6 +1570,7 @@ print "\nECHO::#{dsh_cmd}\n" if $arg_echo
 time_start = Time.new  # ----------------------------
 threads = []
 err_found = []
+@lock = Mutex.new
 hosts_todo.each { |site|
   begin
     threads << Thread.new( site ) { |this_host|
