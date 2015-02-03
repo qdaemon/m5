@@ -237,6 +237,10 @@ USAGE(S):  #{$script_name} <-h|--help>
 
                   Optional.  Filter given string from hostname in printout.
 
+  --ignore-port-check
+
+                  Optional.  Don't perform port check when ssh'ing.
+
   -i | --interactive
 
                   Optional.  Thread count will always be set to one in this
@@ -988,9 +992,9 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
   end
 
   # DEBUG ...
-  #puts "this_user = #{this_user}",
-  #     "this_cmd  = #{this_cmd}",
-  #     "action    = #{action}"
+  #puts "this_user = #{this_user}"
+  #puts "this_cmd  = #{this_cmd}"
+  #puts "action    = #{action}"
 
   this_proc      = nil    # Handle to ssh process to be executed ...
   conn_good      = false  # Assume bad connection until checked ...
@@ -999,7 +1003,7 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
   time_test = Time.new.to_i  # Noting the start time ...
 
   # First check for connection possibilities ...
-  port_is_open = if this_port == 0
+  port_is_open = if this_port == 0 or not $arg_port_check
     [ true, "OK" ] # Assume true if port is ignored in command ...
   else
     check_open_port( host, this_port )
@@ -1198,6 +1202,9 @@ arg_step  = 0
 
 show_ending_summation = true
 
+# Test port when using ssh ...
+$arg_port_check = true
+
 # Pretty printing ...
 $arg_verbose  = true  # Do verbose ...
 $arg_unique   = false # Group similar output ...
@@ -1258,6 +1265,7 @@ begin
     [ "--echo",                 GetoptLong::NO_ARGUMENT       ],
     [ "--except",       "-e",   GetoptLong::REQUIRED_ARGUMENT ],
     [ "--host-filter",          GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--ignore-port-check",    GetoptLong::NO_ARGUMENT       ],
     [ "--hush",                 GetoptLong::NO_ARGUMENT       ],
     [ "--hush-unique",          GetoptLong::NO_ARGUMENT       ],
     [ "--interactive",  "-i",   GetoptLong::NO_ARGUMENT       ],
@@ -1301,6 +1309,8 @@ begin
       when              /--echo$/ then $arg_echo            = true
       when        /--except$|-e$/ then arg_except           = arg.to_s
       when       /--host-filter$/ then $host_filter         = arg.to_s
+      when       /--ignore-port-check$/
+        $arg_port_check = false
       when       /--hush-unique$/
         $arg_verbose = false
         $arg_unique = true
