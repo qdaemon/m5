@@ -60,6 +60,9 @@
 #   FILTERSCRIPT - Specify script/program name to filter results with.  Treat 
 #     script/program as if results were piped through it.
 #
+#   PREPEND_REGEX - Hash of regexp strings to string to prepend to ssh
+#     command.
+#
 
 #
 # Build out the full DSH command line, making sure to use either single quote
@@ -977,7 +980,18 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
     action = action.gsub(/__SHOST__/, host.split('.')[0])
   end
 
+  prepend_port_check = true
   this_cmd  = "ssh -x"
+  # Check for PREPEND_REGEX ...
+  if $configs.has_key?("PREPEND_REGEX")
+    $configs["PREPEND_REGEX"].keys.each { |k|
+      if /#{k}/ =~ host
+        prepend_port_check = false
+        this_cmd  = "#{$configs["PREPEND_REGEX"][k]} #{this_cmd}"
+        break
+      end
+    }
+  end
   this_cmd  = "#{$arg_prefix} #{this_cmd}" if not $arg_prefix.nil?
   this_cmd  = "#{this_cmd} -p #{this_port}" if this_port != 0
   this_cmd  = "#{this_cmd} -i #{id_file}" if not id_file.nil?
@@ -1003,7 +1017,9 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
   time_test = Time.new.to_i  # Noting the start time ...
 
   # First check for connection possibilities ...
-  port_is_open = if this_port == 0 or not $arg_port_check
+  port_is_open = if this_port == 0 \
+    or not $arg_port_check \
+    or not prepend_port_check
     [ true, "OK" ] # Assume true if port is ignored in command ...
   else
     check_open_port( host, this_port )
