@@ -63,6 +63,13 @@
 #   PREPEND_REGEX - Hash of regexp strings to string to prepend to ssh
 #     command.
 #
+#   Use SSH chaining.
+#     JUMP_SSH_CMD - SSH command used to prepend.
+#     JUMP_NODES - Similar to PREPEND_REGEX. Hash of regexp strings to
+#       hostname of jump nodes.
+#     Variable "__JUMP__" - Any reference to this variable in action will be
+#       replaced with associating jump node.
+#
 
 #
 # Build out the full DSH command line, making sure to use either single quote
@@ -980,9 +987,9 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
     action = action.gsub(/__SHOST__/, host.split('.')[0])
   end
 
-  prepend_port_check = true
   this_cmd  = "ssh -x"
   # Check for PREPEND_REGEX ...
+  prepend_port_check = true
   if $configs.has_key?("PREPEND_REGEX")
     $configs["PREPEND_REGEX"].keys.each { |k|
       if /#{k}/ =~ host
@@ -991,6 +998,21 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
         break
       end
     }
+  end
+  # Check for jump host(s) ...
+  jump_host_port_check = true
+  if $configs.has_key?("JUMP_SSH_CMD")
+    if $configs.has_key?("JUMP_NODES")
+      $configs["JUMP_NODES"].keys.each { |k|
+        if /#{k}/ =~ host
+          jump_host_port_check = false
+          jump_host = $configs["JUMP_NODES"][k]
+          this_cmd  = "#{$configs["JUMP_SSH_CMD"]} #{jump_host} #{this_cmd}"
+          action    = action.gsub(/__JUMP__/, jump_host)
+          break
+        end
+      }
+    end
   end
   this_cmd  = "#{$arg_prefix} #{this_cmd}" if not $arg_prefix.nil?
   this_cmd  = "#{this_cmd} -p #{this_port}" if this_port != 0
@@ -1019,7 +1041,8 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
   # First check for connection possibilities ...
   port_is_open = if this_port == 0 \
     or not $arg_port_check \
-    or not prepend_port_check
+    or not prepend_port_check \
+    or not jump_host_port_check
     [ true, "OK" ] # Assume true if port is ignored in command ...
   else
     check_open_port( host, this_port )
