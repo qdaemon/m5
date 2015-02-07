@@ -20,6 +20,12 @@
 #
 #   DSH_LOG_FILE - Override LOG_FILE config (see below).
 #
+#   DSH_USE_JUMP - Same as using "--cmd-jump" on the command line. A value
+#     of '1' means 'true', everything else is 'false'.
+#
+#   DSH_USE_PREPEND - Same as using "--cmd-prepend" on the command line. A
+#     value of '1' means 'true', everything else is 'false'.
+#
 # Current supported variables in dsh.conf.  Any of the below may be
 # override with environment variable of the same with prefix:
 #   "DSH_<name of variable below>"
@@ -60,17 +66,21 @@
 #   FILTERSCRIPT - Specify script/program name to filter results with.  Treat 
 #     script/program as if results were piped through it.
 #
+#   USE_PREPEND - Same as using "--cmd-prepend" on the command line. A value of
+#     '1' means 'true', everything else is 'false'.
 #   PREPEND_REGEX - Hash of regexp strings to string to prepend to ssh
 #     command.
 #
-#   Use SSH chaining.
+#   USE_JUMP - Same as using "--cmd-jump" on the command line. A value of '1'
+#     means 'true', everything else is 'false'.
+#   Use SSH tunneling.
 #     JUMP_SSH_CMD - SSH command used to prepend.
 #     JUMP_NODES - Similar to PREPEND_REGEX. Hash of regexp strings to
 #       hostname of jump nodes.
 #     Variable "__JUMP__" - Any reference to this variable in action will be
 #       replaced with associating jump node.
-#     NOTE: For local option (-l), only "__JUMP__" will be replaced. No ssh
-#       prepending.
+#     NOTE!!! If __JUMP__ is used within action, then JUMP_SSH_CMD will not be
+#       applied.
 #
 
 #
@@ -126,6 +136,8 @@ $globals = {
   "MAX_THREADS"        => 48,
   "SSH_PORT"           => 22,
   "SSH_USER"           => "root",
+  "USE_JUMP"           => 0,
+  "USE_PREPEND"        => 0,
   "CLASSES"            => {},
   "CLASSES_EXTENDED"   => {},
   "FILTERSCRIPT"       => nil
@@ -142,6 +154,14 @@ $globals['PID'] = $$ # This has to come after the overrides as this should
 
 if ENV.has_key?('DSH_USER')
   $configs['SSH_USER'] = ENV['DSH_USER'] if ENV['DSH_USER']
+end
+
+if ENV.has_key?('DSH_USE_JUMP')
+  $configs['USE_JUMP'] = ENV['DSH_USE_JUMP'].to_i if ENV['DSH_USE_JUMP']
+end
+
+if ENV.has_key?('DSH_USE_PREPEND')
+  $configs['USE_PREPEND'] = ENV['DSH_USE_PREPEND'].to_i if ENV['DSH_USE_PREPEND']
 end
 
 arg_threads = $configs['DEFAULT_THREADS']
@@ -213,8 +233,15 @@ USAGE(S):  #{$script_name} <-h|--help>
 
                   Mutually exclusive from '-a' option.
 
+  --cmd-jump      Optional. Prefix with JUMP_SSH_CMD and/or JUMP_NODES
+                  definitions in the dsh.conf file,, and replace __JUMP__ with
+                  tunneling node as applicable ...
+
   --cmd-prefix    Optional.  Prefix all "ssh" calls with some command; e.g.,
                   "tsocks ssh ...".
+
+  --cmd-prepend   Optional. Prefix with PREPEND_PREFIX definitions in the
+                  dsh.conf file ...
 
   -d | --display  Optional.  If used, all other options will be ignored except
                   the '-s' option.  This option will ask DSH to display all
@@ -406,6 +433,17 @@ NOTES:
 
   * Use '__SSH_PORT__' as a place holder to be replace with SSH port
     to be used for *this* host.
+
+  * Use '__JUMP__' as a place holder to be replace with ssh tunneling node.
+    You must define JUMP_NODES in dsh.conf or dsh.rb will error out.
+
+  * Order of application for proxy node, prepend, and prefix arguments:
+      1. --cmd-jump (for ssh tunneling and/or __JUMP__ replacement)
+      2. --cmd-prepend
+      3. --cmd-prefix
+    This means that if you use all three, then the final command to be
+    executed is something like this:
+      <prefix> <prepend> <jump node and/or command> <action>
 
 EXAMPLES:
 
@@ -990,9 +1028,27 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
   end
 
   this_cmd  = "ssh -x"
+  # Check for jump host(s) ...
+  jump_host_port_check = true
+  if $arg_jump and $configs.has_key?("JUMP_SSH_CMD")
+    if $configs.has_key?("JUMP_NODES")
+      $configs["JUMP_NODES"].keys.each { |k|
+        if /#{k}/ =~ host
+          jump_host_port_check = false
+          jump_host = $configs["JUMP_NODES"][k]
+          if action.include? "__JUMP__"
+            action   = action.gsub(/__JUMP__/, jump_host)
+          else
+            this_cmd = "#{$configs["JUMP_SSH_CMD"]} #{jump_host} #{this_cmd}"
+          end  
+          break
+        end
+      }
+    end
+  end
   # Check for PREPEND_REGEX ...
   prepend_port_check = true
-  if $configs.has_key?("PREPEND_REGEX")
+  if $arg_prepend and $configs.has_key?("PREPEND_REGEX")
     $configs["PREPEND_REGEX"].keys.each { |k|
       if /#{k}/ =~ host
         prepend_port_check = false
@@ -1000,21 +1056,6 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
         break
       end
     }
-  end
-  # Check for jump host(s) ...
-  jump_host_port_check = true
-  if $configs.has_key?("JUMP_SSH_CMD")
-    if $configs.has_key?("JUMP_NODES")
-      $configs["JUMP_NODES"].keys.each { |k|
-        if /#{k}/ =~ host
-          jump_host_port_check = false
-          jump_host = $configs["JUMP_NODES"][k]
-          this_cmd  = "#{$configs["JUMP_SSH_CMD"]} #{jump_host} #{this_cmd}"
-          action    = action.gsub(/__JUMP__/, jump_host)
-          break
-        end
-      }
-    end
   end
   this_cmd  = "#{$arg_prefix} #{this_cmd}" if not $arg_prefix.nil?
   this_cmd  = "#{this_cmd} -p #{this_port}" if this_port != 0
@@ -1030,9 +1071,15 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
   end
 
   # DEBUG ...
-  #puts "this_user = #{this_user}"
-  #puts "this_cmd  = #{this_cmd}"
-  #puts "action    = #{action}"
+  @lock.synchronize {
+    if $arg_debug
+      puts "DEBUG [fn_do_ssh:#{host}] arg_jump    = #{$arg_jump}"    if defined?($arg_jump)
+      puts "DEBUG [fn_do_ssh:#{host}] arg_prepend = #{$arg_prepend}" if defined?($arg_prepend)
+      puts "DEBUG [fn_do_ssh:#{host}] this_user   = #{this_user}"    if defined?(this_user)
+      puts "DEBUG [fn_do_ssh:#{host}] action      = #{action}"       if defined?(action)
+      puts "DEBUG [fn_do_ssh:#{host}] this_cmd    = #{this_cmd}"     if defined?(this_cmd)
+    end
+  }
 
   this_proc      = nil    # Handle to ssh process to be executed ...
   conn_good      = false  # Assume bad connection until checked ...
@@ -1099,8 +1146,24 @@ def fn_do_local( host, action, max_time )
   else
     this_cmd = "#{action} 2>&1"
   end
+  # Check for jump host(s) ...
+  if $arg_jump and $configs.has_key?("JUMP_SSH_CMD")
+    if $configs.has_key?("JUMP_NODES")
+      $configs["JUMP_NODES"].keys.each { |k|
+        if /#{k}/ =~ host
+          jump_host = $configs["JUMP_NODES"][k]
+          if action.include? "__JUMP__"
+            this_cmd = this_cmd.gsub(/__JUMP__/, jump_host)
+          else
+            this_cmd = "#{$configs["JUMP_SSH_CMD"]} #{jump_host} #{this_cmd}"
+          end  
+          break
+        end
+      }
+    end
+  end
   # Check for PREPEND_REGEX ...
-  if $configs.has_key?("PREPEND_REGEX")
+  if $arg_prepend and $configs.has_key?("PREPEND_REGEX")
     $configs["PREPEND_REGEX"].keys.each { |k|
       if /#{k}/ =~ host
         this_cmd = "#{$configs["PREPEND_REGEX"][k]} #{this_cmd}"
@@ -1108,22 +1171,18 @@ def fn_do_local( host, action, max_time )
       end
     }
   end
-  # Check for jump host(s) ...
-  if $configs.has_key?("JUMP_SSH_CMD")
-    if $configs.has_key?("JUMP_NODES")
-      $configs["JUMP_NODES"].keys.each { |k|
-        if /#{k}/ =~ host
-          this_cmd  = this_cmd.gsub(/__JUMP__/, $configs["JUMP_NODES"][k])
-          break
-        end
-      }
-    end
-  end
+  this_cmd  = "#{$arg_prefix} #{this_cmd}" if not $arg_prefix.nil?
 
   # DEBUG ...
-  #puts "id_user  = #{id_user}"
-  #puts "this_cmd = #{this_cmd}"
-  #puts "action   = #{action}"
+  @lock.synchronize {
+    if $arg_debug
+      puts "DEBUG [fn_do_local:#{host}] arg_jump    = #{$arg_jump}"    if defined?($arg_jump)
+      puts "DEBUG [fn_do_local:#{host}] arg_prepend = #{$arg_prepend}" if defined?($arg_prepend)
+      puts "DEBUG [fn_do_local:#{host}] id_user     = #{id_user}"      if defined?(id_user)
+      puts "DEBUG [fn_do_local:#{host}] action      = #{action}"       if defined?(action)
+      puts "DEBUG [fn_do_local:#{host}] this_cmd    = #{this_cmd}"     if defined?(this_cmd)
+    end
+  }
 
   this_proc      = nil    # Handle to current process to be executed ...
   output_message = ""     # Result of "doing"; errors and all ...
@@ -1251,7 +1310,13 @@ arg_numbers = false # Display counts of hosts; special logic in grouping ...
 arg_ssh     = ''    # Any additional SSH args ...
 arg_tty     = false # If true, enabled SSH tty allocation ...
 
-$arg_prefix = nil # If set, put prefix in front of each "ssh" execution ...
+$arg_prefix = nil   # If set, put prefix in front of each "ssh" execution ...
+
+# If true, apply JUMP_SSH_CMD and JUMP_NODES information from dsh.conf ...
+$arg_jump = ( $configs['USE_JUMP'] == 1 ? true : false )
+
+# If true, apply PREPEND_REGEX from dsh.conf ...
+$arg_prepend = ( $configs['USE_PREPEND'] == 1 ? true : false )
 
 $arg_echo = false # If true, echo commands but not execute ...
 
@@ -1301,6 +1366,9 @@ $enable_stricthostkeychk = false # Default is "-o StrictHostKeyChecking=no" ...
 #   --hush-unique option is chosen ...
 $host_output = {}
 
+# Debuging ...
+$arg_debug = false
+
 #
 # Log variables initialization ...
 #
@@ -1327,7 +1395,10 @@ begin
   cmd_opts.set_options(
     [ "--actions",      "-a",   GetoptLong::REQUIRED_ARGUMENT ],
     [ "--raw-actions",  "-A",   GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--cmd-jump",             GetoptLong::NO_ARGUMENT       ],
     [ "--cmd-prefix",           GetoptLong::REQUIRED_ARGUMENT ],
+    [ "--cmd-prepend",          GetoptLong::NO_ARGUMENT       ],
+    [ "--debug",                GetoptLong::NO_ARGUMENT       ],
     [ "--display",      "-d",   GetoptLong::NO_ARGUMENT       ],
     [ "--echo",                 GetoptLong::NO_ARGUMENT       ],
     [ "--except",       "-e",   GetoptLong::REQUIRED_ARGUMENT ],
@@ -1371,7 +1442,10 @@ begin
       when   /--raw-actions$|-A$/
         $arg_raw_actions = true
         arg_actions = arg.to_s
+      when          /--cmd-jump$/ then $arg_jump            = true
       when        /--cmd-prefix$/ then $arg_prefix          = arg.to_s
+      when       /--cmd-prepend$/ then $arg_prepend         = true
+      when             /--debug$/ then $arg_debug           = true
       when       /--display$|-d$/ then arg_display          = true
       when              /--echo$/ then $arg_echo            = true
       when        /--except$|-e$/ then arg_except           = arg.to_s
