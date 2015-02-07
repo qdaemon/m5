@@ -69,6 +69,8 @@
 #       hostname of jump nodes.
 #     Variable "__JUMP__" - Any reference to this variable in action will be
 #       replaced with associating jump node.
+#     NOTE: For local option (-l), only "__JUMP__" will be replaced. No ssh
+#       prepending.
 #
 
 #
@@ -1089,6 +1091,7 @@ def fn_do_local( host, action, max_time )
 
   host, ssh_port, id_file, id_user = fn_parse_host_ssh( host )
 
+  this_cmd = ''
   unless $arg_raw_actions
     this_cmd = "#{action.gsub(/__HOST__/, host)} 2>&1"
     this_cmd = this_cmd.gsub(/__SHOST__/, host.split('.')[0])
@@ -1096,6 +1099,31 @@ def fn_do_local( host, action, max_time )
   else
     this_cmd = "#{action} 2>&1"
   end
+  # Check for PREPEND_REGEX ...
+  if $configs.has_key?("PREPEND_REGEX")
+    $configs["PREPEND_REGEX"].keys.each { |k|
+      if /#{k}/ =~ host
+        this_cmd = "#{$configs["PREPEND_REGEX"][k]} #{this_cmd}"
+        break
+      end
+    }
+  end
+  # Check for jump host(s) ...
+  if $configs.has_key?("JUMP_SSH_CMD")
+    if $configs.has_key?("JUMP_NODES")
+      $configs["JUMP_NODES"].keys.each { |k|
+        if /#{k}/ =~ host
+          this_cmd  = this_cmd.gsub(/__JUMP__/, $configs["JUMP_NODES"][k])
+          break
+        end
+      }
+    end
+  end
+
+  # DEBUG ...
+  #puts "id_user  = #{id_user}"
+  #puts "this_cmd = #{this_cmd}"
+  #puts "action   = #{action}"
 
   this_proc      = nil    # Handle to current process to be executed ...
   output_message = ""     # Result of "doing"; errors and all ...
