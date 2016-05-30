@@ -66,6 +66,11 @@
 #   FILTERSCRIPT - Specify script/program name to filter results with.  Treat 
 #     script/program as if results were piped through it.
 #
+#   IGNORE_PORT_CHECK - List of hosts (array) that will not need port checking.
+#     This is more generalized than *JUMP* feature as dsh is expecting user to
+#     define the connections outside of dsh itself; e.g., ~/.ssh/config using
+#     proxy.
+#
 #   USE_PREPEND - Same as using "--cmd-prepend" on the command line. A value of
 #     '1' means 'true', everything else is 'false'.
 #   PREPEND_REGEX - Hash of regexp strings to string to prepend to ssh
@@ -138,6 +143,7 @@ $globals = {
   "SSH_USER"           => "root",
   "USE_JUMP"           => 0,
   "USE_PREPEND"        => 0,
+  "IGNORE_PORT_CHECK"  => [],
   "CLASSES"            => {},
   "CLASSES_EXTENDED"   => {},
   "FILTERSCRIPT"       => nil
@@ -1090,6 +1096,7 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
   # First check for connection possibilities ...
   port_is_open = if this_port == 0 \
     or not $arg_port_check \
+    or $configs['IGNORE_PORT_CHECK'].include?(host) \
     or not prepend_port_check \
     or not jump_host_port_check
     [ true, "OK" ] # Assume true if port is ignored in command ...
