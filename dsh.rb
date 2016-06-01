@@ -1117,7 +1117,11 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
         this_proc = IO.popen( this_cmd, "r" )
         output_message = this_proc.readlines.join
         this_proc.close
-      end
+        tmp_res = "#{$?}".split.last.to_i
+        if tmp_res == 255
+          output_message = "ssh ERROR [#{tmp_res}]"
+        end
+    end
       rescue TimeoutError
         rtn_errors << "#{host} - #{$!}"
         output_message = rtn_errors[-1]
