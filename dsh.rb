@@ -1125,7 +1125,7 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
         if tmp_res == 255
           output_message = "ssh ERROR [#{tmp_res}]"
         end
-    end
+      end
       rescue TimeoutError
         rtn_errors << "#{host} - #{$!}"
         output_message = rtn_errors[-1]
