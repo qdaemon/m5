@@ -1064,7 +1064,11 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
     }
   end
   this_cmd  = "#{$arg_prefix} #{this_cmd}" if not $arg_prefix.nil?
-  this_cmd  = "#{this_cmd} -p #{this_port}" if this_port != 0
+  if this_port != 0 \
+    and $arg_port_check \
+    and not $configs['IGNORE_PORT_CHECK'].include?(host)
+    this_cmd  = "#{this_cmd} -p #{this_port}"
+  end
   this_cmd  = "#{this_cmd} -i #{id_file}" if not id_file.nil?
   this_cmd += " #{ssh_opt}"
   this_cmd += " #{this_user}\@#{host}"
