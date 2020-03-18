@@ -1126,7 +1126,7 @@ def fn_do_ssh( host, this_user, action, max_time, ssh_opt )
           output_message = "ssh ERROR [#{tmp_res}]"
         end
       end
-      rescue TimeoutError
+      rescue Timeout::Error
         rtn_errors << "#{host} - #{$!}"
         output_message = rtn_errors[-1]
         #this_proc.close if ! this_proc.closed?
@@ -1217,7 +1217,7 @@ def fn_do_local( host, action, max_time )
       output_message = this_proc.readlines.join
       this_proc.close
     end
-    rescue TimeoutError
+    rescue Timeout::Error
       rtn_errors << "#{host} - #{$!}"
       output_message = rtn_errors[-1]
       #this_proc.close if ! this_proc.closed?
